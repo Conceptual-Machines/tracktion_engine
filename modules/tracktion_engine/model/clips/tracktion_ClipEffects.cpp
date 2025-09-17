@@ -560,7 +560,7 @@ private:
                     }
                     else
                     {
-                        numLatencySamplesToDrop -= samplesToDo;
+                        numLatencySamplesToDrop -= int (samplesToDo);
                     }
                 }
                 else
