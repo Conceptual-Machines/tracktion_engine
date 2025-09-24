@@ -32,6 +32,9 @@ VirtualMidiInputDevice::VirtualMidiInputDevice (Engine& e, juce::String deviceNa
       useAllInputs (isAllMIDIIns),
       deviceType (devType)
 {
+    if (deviceType == trackMidiDevice)
+        enabled = false;
+
     if (isAllMIDIIns)
         defaultMonitorMode = MonitorMode::on;
 
