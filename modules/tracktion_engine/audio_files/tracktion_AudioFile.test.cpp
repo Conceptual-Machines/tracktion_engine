@@ -25,7 +25,7 @@ TEST_SUITE ("tracktion_engine")
         auto sampleRate = 44100.0;
         auto numSamples = toSamples (duration, sampleRate);
 
-        auto totalSizeBytes = numChannels * numSamples * sizeof (int16_t);
+        auto totalSizeBytes = static_cast<size_t> (numChannels * numSamples) * sizeof (int16_t);
         auto mb = juce::MemoryBlock (totalSizeBytes);
         auto os = std::unique_ptr<juce::OutputStream> (std::make_unique<juce::MemoryOutputStream> (mb, false));
         auto w = juce::WavAudioFormat().createWriterFor (os,
@@ -40,7 +40,7 @@ TEST_SUITE ("tracktion_engine")
             auto numLeft = numSamples - i;
             auto numThisTime = std::min (static_cast<int64_t> (blockSize), numLeft);
 
-            temp.setSize (numChannels, numThisTime, true, false, true);
+            temp.setSize (numChannels, static_cast<int> (numThisTime), true, false, true);
             w->writeFromAudioSampleBuffer (temp, 0, temp.getNumSamples());
 
             i += numThisTime;
