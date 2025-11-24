@@ -401,7 +401,8 @@ namespace RackNodeBuilder
         for (auto m : rack.getModifierList().getModifiers())
             itemNodes[m->itemID] = makeNode<ModifierNode> (makeNode<ConnectedNode> ((size_t) m->itemID.getRawID()),
                                                            m, sampleRate, blockSize, nullptr,
-                                                           processState.playHeadState, isRendering);
+                                                           processState.playHeadState, isRendering,
+                                                           ModifierNode::ClearOutputs::yes);
 
         // Create an input node and an output summing node
         auto outputNode = std::make_unique<ConnectedNode>();

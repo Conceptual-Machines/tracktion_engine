@@ -83,6 +83,10 @@ inline choc::buffer::BufferView<SampleType, choc::buffer::SeparateChannelLayout>
                                                  (choc::buffer::FrameCount) buffer.getNumSamples());
 }
 
+/** Returns the RMS of a single channel buffer. */
+template<typename SampleType>
+SampleType getRMS (choc::buffer::MonoView<SampleType>);
+
 //==============================================================================
 /** All laws have been designed to be equal-power, excluding linear respectively */
 enum PanLaw
@@ -254,6 +258,24 @@ inline void clearChannels (juce::AudioBuffer<float>& buffer, int startChannel, i
     for (int ch = startChannel; ch < endChannel; ch++)
         buffer.clear (ch, startSample, endSample);
 }
+
+
+//==============================================================================
+template<typename SampleType>
+inline SampleType getRMS (choc::buffer::MonoView<SampleType> view)
+{
+    auto numSamples = view.getNumFrames();
+    double sum = 0.0;
+
+    for (choc::buffer::FrameCount i = 0; i < numSamples; ++i)
+    {
+        auto sample = view.getSample (0, i);
+        sum += sample * sample;
+    }
+
+    return static_cast<SampleType> (std::sqrt (sum / numSamples));
+}
+
 
 }} // namespace tracktion { inline namespace engine
 

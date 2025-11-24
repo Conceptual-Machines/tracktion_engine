@@ -363,6 +363,51 @@ private:
 
 static ModifiedParameterValuesTests modifiedParameterValuesTests;
 
+
+//==============================================================================
+//==============================================================================
+TEST_SUITE ("tracktion_engine")
+{
+    TEST_CASE ("Modifiers in Racks")
+    {
+        // Add a Modifier to a Rack and ensure the input isn't present on the output
+        auto& engine = *Engine::getEngines()[0];
+        auto edit = engine::test_utilities::createTestEdit (engine, 1, Edit::forEditing);
+
+        auto rackType = edit->getRackList().addNewRack();
+        auto modifier = rackType->getModifierList().insertModifier (juce::ValueTree (IDs::ENVELOPEFOLLOWER), 0, nullptr);
+        CHECK(rackType->addConnection (EditItemID(), 1, modifier->itemID, 1));
+        CHECK(rackType->addConnection (EditItemID(), 2, modifier->itemID, 2));
+
+        auto& track = *getAudioTracks (*edit)[0];
+        auto fileLength = 5_td;
+        auto squareFile = graph::test_utilities::getSquareFile<juce::WavAudioFormat> (44100.0, fileLength.inSeconds());
+        auto squareAudioFile = AudioFile (engine, squareFile->getFile());
+        insertWaveClip (track, {}, squareFile->getFile(),
+                        ClipPosition {{ 0_tp, fileLength }}, DeleteExistingClips::no);
+
+        // Check square clip is audible
+        {
+            auto player = test_utilities::createEnginePlayer (*edit, {}, { squareAudioFile });
+            auto buffer = process (*player, fileLength);
+
+            CHECK_GT(getRMS (toBufferView (buffer).getChannel (0)), 0.99f);
+        }
+
+        // Now add Rack and clip shouldn't be heard
+        {
+            [[maybe_unused]] auto rackInstance = track.pluginList.insertPlugin (RackInstance::create (*rackType), 0);
+
+            edit->getTransport().setPosition (0_tp);
+            auto player = test_utilities::createEnginePlayer (*edit, {}, { squareAudioFile });
+            auto buffer = process (*player, fileLength);
+
+            CHECK_LT(getRMS (toBufferView (buffer).getChannel (0)), 0.01f);
+        }
+    }
+}
+
+
 #endif
 
 

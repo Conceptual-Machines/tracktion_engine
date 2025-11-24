@@ -18,12 +18,14 @@ ModifierNode::ModifierNode (std::unique_ptr<Node> inputNode,
                             tracktion::engine::Modifier::Ptr modifierToProcess,
                             double sampleRateToUse, int blockSizeToUse,
                             const TrackMuteState* trackMuteStateToUse,
-                            tracktion::graph::PlayHeadState& playHeadStateToUse, bool rendering)
+                            tracktion::graph::PlayHeadState& playHeadStateToUse,
+                            bool rendering, ClearOutputs clearOutputs_)
     : input (std::move (inputNode)),
       modifier (std::move (modifierToProcess)),
       trackMuteState (trackMuteStateToUse),
       playHeadState (&playHeadStateToUse),
-      isRendering (rendering)
+      isRendering (rendering),
+      clearOutputs (clearOutputs_)
 {
     jassert (input != nullptr);
     jassert (modifier != nullptr);
@@ -116,8 +118,15 @@ void ModifierNode::process (ProcessContext& pc)
     if (shouldProcess)
         modifier->baseClassApplyToBuffer (getPluginRenderContext (pc.referenceSampleRange, outputAudioBuffer));
 
-    // Then copy the buffers to the outputs
-    outputBuffers.midi.copyFrom (midiMessageArray);
+    if (clearOutputs == ClearOutputs::yes)
+    {
+        outputAudioBlock.clear();
+    }
+    else
+    {
+        // Then copy the buffers to the outputs
+        outputBuffers.midi.copyFrom (midiMessageArray);
+    }
 }
 
 //==============================================================================

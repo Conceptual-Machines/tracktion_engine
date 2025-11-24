@@ -118,6 +118,14 @@ private:
     int numSamplesProcessed = 0;
 };
 
+//==============================================================================
+//==============================================================================
+/** Process a duration. */
+inline juce::AudioBuffer<float> process (EnginePlayer& player, TimeDuration td)
+{
+    auto numSamples = toSamples (td, player.getParams().sampleRate);
+    return player.process (numSamples);
+}
 
 //==============================================================================
 //==============================================================================

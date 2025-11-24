@@ -171,6 +171,7 @@ void Modifier::baseClassDeinitialise()
 void Modifier::baseClassApplyToBuffer (const PluginRenderContext& prc)
 {
     applyToBuffer (prc);
+
     jassert (valueFifo);
     const float v = getCurrentValue();
     valueFifo->addValue (prc.bufferNumSamples, getCurrentValue());

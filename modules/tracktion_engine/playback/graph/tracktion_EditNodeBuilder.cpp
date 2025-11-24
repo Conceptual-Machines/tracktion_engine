@@ -1334,7 +1334,8 @@ std::unique_ptr<tracktion::graph::Node> createModifierNodeForList (ModifierList*
                 continue;
 
             node = makeNode<ModifierNode> (std::move (node), modifier, params.sampleRate, params.blockSize,
-                                           trackMuteState, playHeadState, params.forRendering);
+                                           trackMuteState, playHeadState, params.forRendering,
+                                           ModifierNode::ClearOutputs::no);
         }
     }
 

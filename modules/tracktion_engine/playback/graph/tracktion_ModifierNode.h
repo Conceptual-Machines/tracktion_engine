@@ -22,17 +22,26 @@ class ModifierNode final    : public tracktion::graph::Node
 {
 public:
     //==============================================================================
+    enum class ClearOutputs : bool
+    {
+        no,
+        yes
+    };
+
     /** Creates a ModifierNode to process a Modifier.
         @param const TrackMuteState*    The optional TrackMuteState to use
         @param PlayHeadState            The PlayHeadState to monitor for jumps
         @param rendering                Should be true if this is an offline render
+        @param ClearOutputs             Whether to clear the outputs or pass them through
 
     */
     ModifierNode (std::unique_ptr<Node> input,
                   tracktion::engine::Modifier::Ptr,
                   double sampleRateToUse, int blockSizeToUse,
                   const TrackMuteState*,
-                  tracktion::graph::PlayHeadState&, bool rendering);
+                  tracktion::graph::PlayHeadState&,
+                  bool rendering,
+                  ClearOutputs);
 
     /** Creates a ModifierNode to process a plugin on in a Rack with an InputProvider.
         @param InputProvider            The InputProvider to provide inputs and a PluginRenderContext
@@ -65,6 +74,7 @@ private:
     const TrackMuteState* trackMuteState = nullptr;
     tracktion::graph::PlayHeadState* playHeadState = nullptr;
     bool isRendering = false;
+    ClearOutputs clearOutputs = ClearOutputs::no;
 
     bool isInitialised = false;
     double sampleRate = 44100.0;
