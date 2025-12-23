@@ -1298,6 +1298,9 @@ EditItemID Edit::createNewItemID (const std::vector<EditItemID>& idsToAvoid) con
 
     auto newID = EditItemID::fromRawID (nextID++);
 
+    while (contains_v (idsToAvoid, newID))
+        newID = EditItemID::fromRawID (nextID++);
+
    #if JUCE_DEBUG
     jassert (usedIDs.find (newID) == usedIDs.end());
     usedIDs.insert (newID);
