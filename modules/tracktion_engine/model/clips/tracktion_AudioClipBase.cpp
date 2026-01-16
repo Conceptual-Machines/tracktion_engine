@@ -800,7 +800,7 @@ void AudioClipBase::copyFadeToAutomation (bool useFadeIn, bool removeClipFade)
     {
         ui.showWarningMessage (TRANS("Could not create automation.")
                                  + "\n\n"
-                                 + TRANS("No volume plguin was found for this track, please insert one and try again"));
+                                 + TRANS("No volume plugin was found for this track, please insert one and try again"));
         return;
     }
 
