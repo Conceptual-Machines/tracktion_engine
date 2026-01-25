@@ -658,6 +658,7 @@ ExternalPlugin::ExternalPlugin (PluginCreationInfo info)  : Plugin (info)
     setEnabled (state.getProperty (IDs::enabled, true));
     desc.name = state[IDs::name];
     desc.manufacturerName = state[IDs::manufacturer];
+    desc.pluginFormatName = state.getProperty ("format", juce::String()).toString();
     identiferString = createIdentifierString (desc);
 
     initialiseFully();
@@ -672,6 +673,10 @@ juce::ValueTree ExternalPlugin::create (Engine& e, const juce::PluginDescription
                               IDs::filename, desc.fileOrIdentifier,
                               IDs::name, desc.name,
                               IDs::manufacturer, desc.manufacturerName);
+
+    // Store pluginFormatName to ensure correct plugin is loaded from multi-component bundles
+    if (desc.pluginFormatName.isNotEmpty())
+        v.setProperty ("format", desc.pluginFormatName, nullptr);
 
     if (e.getPluginManager().areGUIsLockedByDefault())
         v.setProperty (IDs::windowLocked, true, nullptr);
@@ -807,6 +812,15 @@ static std::unique_ptr<juce::PluginDescription> findMatchingPluginDescription (E
 {
     auto& pm = engine.getPluginManager();
 
+    // First try: match by uniqueId + name + fileOrIdentifier (most specific)
+    // This ensures correct plugin is selected for VST3 bundles with multiple components
+    // (e.g., Serum 2 vs Serum 2 FX sharing the same .vst3 bundle)
+    if (desc.uniqueId != 0 && desc.name.isNotEmpty())
+        for (auto d : pm.knownPluginList.getTypes())
+            if (d.uniqueId == desc.uniqueId && d.name == desc.name && (desc.fileOrIdentifier.isEmpty() || desc.fileOrIdentifier == d.fileOrIdentifier))
+                return std::make_unique<juce::PluginDescription> (d);
+
+    // Second try: match by uniqueId + fileOrIdentifier only
     if (desc.uniqueId != 0)
         for (auto d : pm.knownPluginList.getTypes())
             if (d.uniqueId == desc.uniqueId && (desc.fileOrIdentifier.isEmpty() || desc.fileOrIdentifier == d.fileOrIdentifier))
@@ -865,16 +879,31 @@ std::unique_ptr<juce::PluginDescription> ExternalPlugin::findMatchingPlugin() co
     CRASH_TRACER
     auto& pm = engine.getPluginManager();
 
+    // Helper to verify matched plugin name (for multi-component bundle disambiguation)
+    auto nameMatches = [this] (const juce::PluginDescription* p)
+    {
+        return desc.name.isEmpty() || p->name == desc.name;
+    };
+
     if (auto p = pm.knownPluginList.getTypeForIdentifierString (createIdentifierString (desc)))
-        return p;
+        if (nameMatches (p.get()))
+            return p;
 
     if (desc.pluginFormatName.isEmpty())
     {
-        if (auto p = pm.knownPluginList.getTypeForIdentifierString ("VST" + createIdentifierString (desc)))
-            return p;
+        auto idStr = createIdentifierString (desc);
 
-        if (auto p = pm.knownPluginList.getTypeForIdentifierString ("AudioUnit" + createIdentifierString (desc)))
-            return p;
+        if (auto p = pm.knownPluginList.getTypeForIdentifierString ("VST3" + idStr))
+            if (nameMatches (p.get()))
+                return p;
+
+        if (auto p = pm.knownPluginList.getTypeForIdentifierString ("VST" + idStr))
+            if (nameMatches (p.get()))
+                return p;
+
+        if (auto p = pm.knownPluginList.getTypeForIdentifierString ("AudioUnit" + idStr))
+            if (nameMatches (p.get()))
+                return p;
     }
 
     if (auto p = findMatchingPluginDescription (engine, desc))
