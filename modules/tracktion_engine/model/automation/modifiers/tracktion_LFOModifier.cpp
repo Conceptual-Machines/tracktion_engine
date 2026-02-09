@@ -24,6 +24,10 @@ struct LFOModifier::LFOModifierTimer    : public ModifierTimer
         modifier.setEditTime (editTime);
         modifier.updateParameterStreams (editTime);
 
+        // Check for programmatic note-on resync (set via triggerNoteOn())
+        if (modifier.pendingNoteOnResync_.exchange (false, std::memory_order_acq_rel))
+            resync (blockLength);
+
         const auto syncTypeThisBlock = juce::roundToInt (modifier.syncTypeParam->getCurrentValue());
         const auto rateTypeThisBlock = getTypedParamValue<ModifierCommon::RateType> (*modifier.rateTypeParam);
 
@@ -246,6 +250,11 @@ void LFOModifier::applyToBuffer (const PluginRenderContext& prc)
     for (auto& m : *prc.bufferForMidiMessages)
         if (m.isNoteOn())
             modifierTimer->resync (prc.bufferNumSamples / getSampleRate());
+}
+
+void LFOModifier::triggerNoteOn()
+{
+    pendingNoteOnResync_.store (true, std::memory_order_release);
 }
 
 //==============================================================================

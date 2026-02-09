@@ -42,6 +42,11 @@ public:
 
     void applyToBuffer (const PluginRenderContext&) override;
 
+    /** Programmatically trigger a note-on resync (resets phase to 0 when syncType == note).
+        Thread-safe: can be called from any thread. The actual resync happens on the next audio
+        block via updateStreamTime(). */
+    void triggerNoteOn();
+
     //==============================================================================
     struct Assignment : public AutomatableParameter::ModifierAssignment
     {
@@ -86,6 +91,7 @@ private:
 
     LambdaTimer changedTimer;
     std::atomic<float> currentPhase { 0.0f }, currentValue { 0.0f };
+    std::atomic<bool> pendingNoteOnResync_ { false };
 
     void valueTreeChanged() override;
 };
