@@ -76,8 +76,13 @@ public:
         eightStepsUp    = 7,
         eightStepsDown  = 8,
         random          = 9,
-        noise           = 10
+        noise           = 10,
+        waveCustomCallback = 11
     };
+
+    using CustomWaveFunction = float (*)(float phase, void* userData);
+    std::atomic<CustomWaveFunction> customWaveFunction { nullptr };
+    std::atomic<void*> customWaveUserData { nullptr };
 
     static juce::StringArray getWaveNames();
 

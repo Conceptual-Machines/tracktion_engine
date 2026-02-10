@@ -113,6 +113,13 @@ struct LFOModifier::LFOModifierTimer    : public ModifierTimer
                 case eightStepsDown:    return getStepsDownSample (newPhase, 8);
                 case random:            return currentRandom;
                 case noise:             return (randomDifference * newPhase) + previousRandom;
+                case waveCustomCallback:
+                {
+                    auto fn = modifier.customWaveFunction.load (std::memory_order_acquire);
+                    auto ud = modifier.customWaveUserData.load (std::memory_order_acquire);
+                    if (fn) return fn (newPhase, ud);
+                    return getSinSample (newPhase);
+                }
             }
 
             return 0.0f;
@@ -193,7 +200,7 @@ LFOModifier::LFOModifier (Edit& e, const juce::ValueTree& v)
     };
 
     using namespace ModifierCommon;
-    waveParam       = addDiscreteParam ("wave",     TRANS("Wave"),      { 0.0f, (float)  getWaveNames().size() - 1 },           wave,       getWaveNames());
+    waveParam       = addDiscreteParam ("wave",     TRANS("Wave"),      { 0.0f, float (waveCustomCallback) },                   wave,       getWaveNames());
     syncTypeParam   = addDiscreteParam ("syncType", TRANS("Sync type"), { 0.0f, (float)  getSyncTypeChoices().size() - 1 },     syncType,   getSyncTypeChoices());
     rateParam       = addParam ("rate",             TRANS("Rate"),      { 0.01f, 50.0f }, 1.0f,                                 rate,       {});
     rateTypeParam   = addDiscreteParam ("rateType", TRANS("Rate Type"), { 0.0f, (float) getRateTypeChoices().size() - 1 },      rateType,   getRateTypeChoices());
@@ -295,7 +302,8 @@ juce::StringArray LFOModifier::getWaveNames()
         NEEDS_TRANS("8 Steps Up"),
         NEEDS_TRANS("8 Steps Down"),
         NEEDS_TRANS("Random"),
-        NEEDS_TRANS("Noise")
+        NEEDS_TRANS("Noise"),
+        NEEDS_TRANS("Custom Callback")
     };
 }
 
