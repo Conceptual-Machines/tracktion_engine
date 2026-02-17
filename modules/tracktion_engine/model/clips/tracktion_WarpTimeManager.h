@@ -146,6 +146,19 @@ public:
     /** Returns a hash representing this warp list. */
     HashCode getHash() const;
 
+    /** Sets the sensitivity used for transient detection (0.0 to 1.0).
+        Call detectTransients() afterwards to re-run detection with the new value.
+    */
+    void setTransientSensitivity (float sensitivity);
+
+    /** Returns the current transient detection sensitivity. */
+    float getTransientSensitivity() const noexcept          { return transientSensitivity; }
+
+    /** Re-runs transient detection with the current sensitivity.
+        Results can be polled via getTransientTimes().
+    */
+    void detectTransients();
+
     /** @internal */
     void editFinishedLoading();
 
@@ -201,6 +214,7 @@ private:
     std::unique_ptr<WarpMarkerList> markers;
     RenderManager::Job::Ptr transientDetectionJob;
     std::pair<bool, juce::Array<TimePosition>> transientTimes { false, {} };
+    float transientSensitivity = 0.5f;
     std::unique_ptr<Edit::LoadFinishedCallback<WarpTimeManager>> editLoadedCallback;
 
     juce::UndoManager* getUndoManager() const;

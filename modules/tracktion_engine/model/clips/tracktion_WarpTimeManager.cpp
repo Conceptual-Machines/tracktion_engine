@@ -546,15 +546,34 @@ TimePosition WarpTimeManager::getWarpEndMarkerTime() const
     return toPosition (getSourceLength());
 }
 
-void WarpTimeManager::editFinishedLoading()
+void WarpTimeManager::setTransientSensitivity (float sensitivity)
 {
+    transientSensitivity = juce::jlimit (0.0f, 1.0f, sensitivity);
+}
+
+void WarpTimeManager::detectTransients()
+{
+    // Cancel any existing detection job
+    if (transientDetectionJob != nullptr)
+    {
+        transientDetectionJob->removeListener (this);
+        transientDetectionJob = nullptr;
+    }
+
+    // Reset transient state
+    transientTimes = { false, {} };
+
     TransientDetectionJob::Config config;
-    config.sensitivity = 0.5f;
+    config.sensitivity = transientSensitivity;
     transientDetectionJob = TransientDetectionJob::getOrCreateDetectionJob (edit.engine, getSourceFile(), config);
 
     if (transientDetectionJob != nullptr)
         transientDetectionJob->addListener (this);
+}
 
+void WarpTimeManager::editFinishedLoading()
+{
+    detectTransients();
     editLoadedCallback = nullptr;
 }
 
