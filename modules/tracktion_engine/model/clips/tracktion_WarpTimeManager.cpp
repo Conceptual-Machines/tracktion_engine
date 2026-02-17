@@ -145,7 +145,8 @@ private:
 
     juce::Range<float> fileMinMax;
     float normaliseScale = -1.0f;
-    const float thresh = juce::Decibels::decibelsToGain (-25.0f);
+    // Map sensitivity (0..1) to threshold in dB: 0 → -10 dB (few), 0.5 → -25 dB (default), 1 → -40 dB (many)
+    const float thresh = juce::Decibels::decibelsToGain (-10.0f - config.sensitivity * 30.0f);
     int triggerTimer = 0;
     int countDownTimer = 0;
     bool findingNormaliseLevel = true;
