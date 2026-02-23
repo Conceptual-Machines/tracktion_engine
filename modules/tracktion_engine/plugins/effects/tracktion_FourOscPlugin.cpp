@@ -1288,11 +1288,16 @@ void FourOscPlugin::valueTreePropertyChanged (juce::ValueTree& v, const juce::Id
         if (i == IDs::voiceMode
             || i == IDs::voices)
         {
+            // Read directly from the ValueTree rather than the CachedValue,
+            // because this listener fires before CachedValue updates its cache.
+            const int currentVoiceMode = v.getProperty (IDs::voiceMode, 2);
+            const int currentVoices    = v.getProperty (IDs::voices, 32);
+
             juce::ScopedLock sl (voicesLock);
-            if (voiceModeValue == 2)
+            if (currentVoiceMode == 2)
             {
-                reduceNumVoices (voicesValue.get());
-                while (getNumVoices() < voicesValue.get())
+                reduceNumVoices (currentVoices);
+                while (getNumVoices() < currentVoices)
                     addVoice (new FourOscVoice (*this));
             }
             else
