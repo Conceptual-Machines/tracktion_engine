@@ -88,9 +88,17 @@ void SlotControlNode::prepareToPlay (const tracktion::graph::PlaybackInitialisat
         return;
 
     if (auto oldGraph = info.nodeGraphToReplace)
+    {
         if (auto oldNode = findNodeWithID<SlotControlNode> (*oldGraph, (size_t) slotID.getRawID()))
+        {
             if (oldNode->lastSamples && oldNode->lastSamples->size() == numChans)
                 lastSamples = oldNode->lastSamples;
+
+            // Preserve playing state across graph rebuilds to prevent
+            // the fade-in from firing when a slot is already playing.
+            wasPlaying = oldNode->wasPlaying;
+        }
+    }
 
     if (lastSamples)
         return;
@@ -288,6 +296,25 @@ void SlotControlNode::processSection (ProcessContext& pc, BeatRange editBeatRang
     assert (sourceBuffers.audio.size == pc.buffers.audio.size);
     copyIfNotAliased (pc.buffers.audio, sourceBuffers.audio);
     pc.buffers.midi.copyFrom (sourceBuffers.midi);
+
+    // Apply a fade-in when transitioning from stopped to playing.
+    // This prevents a click caused by the first audio sample being non-zero.
+    // 256 samples ≈ 5.8ms at 44.1kHz — short enough to be inaudible
+    // but long enough to eliminate the discontinuity from silence to audio.
+    if (! wasPlaying)
+    {
+        const auto numChannels = pc.buffers.audio.size.numChannels;
+        const auto numFrames = pc.buffers.audio.size.numFrames;
+        const uint32_t fadeLength = std::min (numFrames, (uint32_t) 256);
+
+        for (choc::buffer::ChannelCount channel = 0; channel < numChannels; ++channel)
+        {
+            auto dest = pc.buffers.audio.getIterator (channel).sample;
+
+            for (uint32_t i = 0; i < fadeLength; ++i)
+                dest[i] *= (float) i / (float) fadeLength;
+        }
+    }
 
     // Update last samples
     if (lastSamples)

@@ -158,7 +158,7 @@ void ArrangerLauncherSwitchingNode::process (ProcessContext& pc)
 
     processLauncher (pc, slotStatus);
 
-     if (playArranger)
+    if (playArranger)
         processArranger (pc, slotStatus);
 }
 
@@ -173,37 +173,34 @@ void ArrangerLauncherSwitchingNode::processLauncher (ProcessContext& pc, const S
     {
         sortPlayingOrQueuedClipsFirst();
 
-        if (slotStatus.anyClipsPlaying || slotStatus.anyClipsQueued)
+        // Always process ALL launcher nodes unconditionally.
+        // SlotControlNode outputs silence when not playing, so there's no harm.
+        // Gating on getSlotsStatus() caused blocks to be skipped when
+        // LaunchHandle::try_to_lock failed momentarily, producing clicks.
+        for (auto& launcherNode : launcherNodes)
         {
-            for (auto& launcherNode : launcherNodes)
+            using enum LaunchHandle::PlayState;
+            using enum LaunchHandle::QueueState;
+            const auto& lh = launcherNode->getLaunchHandle();
+            const bool slotWasPlaying = lh.getPlayingStatus() == playing;
+
+            launcherNode->Node::process (pc.numSamples, pc.referenceSampleRange);
+
+            const bool slotIsPlaying = lh.getPlayingStatus() == playing;
+            auto sourceBuffers = launcherNode->getProcessedOutput();
+            const auto numSourceChannels = sourceBuffers.audio.getNumChannels();
+
+            // Add the output — non-playing nodes output zeros
+            choc::buffer::add (destAudioView.getFirstChannels (numSourceChannels), sourceBuffers.audio);
+            pc.buffers.midi.mergeFrom (sourceBuffers.midi);
+
+            if (slotWasPlaying && ! slotIsPlaying)
             {
-                using enum LaunchHandle::PlayState;
-                using enum LaunchHandle::QueueState;
-                const auto& lh = launcherNode->getLaunchHandle();
-                const bool slotWasPlaying = lh.getPlayingStatus() == playing;
-                const bool slotWasQueued = lh.getQueuedStatus() == playQueued;
-
-                if (! (slotWasPlaying || slotWasQueued))
-                    continue;
-
-                launcherNode->Node::process (pc.numSamples, pc.referenceSampleRange);
-
-                const bool slotIsPlaying = lh.getPlayingStatus() == playing;
-                auto sourceBuffers = launcherNode->getProcessedOutput();
-                const auto numSourceChannels = sourceBuffers.audio.getNumChannels();
-
-                // We can add the whole block here as if the slot is stopped, part of the buffer will just be silent
-                choc::buffer::add (destAudioView.getFirstChannels (numSourceChannels), sourceBuffers.audio);
-                pc.buffers.midi.mergeFrom (sourceBuffers.midi);
-
-                if (slotWasPlaying && ! slotIsPlaying)
-                {
-                    // Ramp out last 10 samples
-                    const auto endFrame = beatToSamplePosition (slotStatus.beatsUntilQueuedStopTrimmedToBlock,
-                                                                editBeatRange.getLength(), numFrames);
-                    launcherSampleFader->trigger (10);
-                    launcherSampleFader->applyAt (destAudioView,  endFrame, SampleFader::FadeType::fadeOut);
-                }
+                // Ramp out last 10 samples
+                const auto endFrame = beatToSamplePosition (slotStatus.beatsUntilQueuedStopTrimmedToBlock,
+                                                            editBeatRange.getLength(), numFrames);
+                launcherSampleFader->trigger (10);
+                launcherSampleFader->applyAt (destAudioView,  endFrame, SampleFader::FadeType::fadeOut);
             }
         }
     }
