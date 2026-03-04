@@ -24,10 +24,6 @@ struct LFOModifier::LFOModifierTimer    : public ModifierTimer
         modifier.setEditTime (editTime);
         modifier.updateParameterStreams (editTime);
 
-        // Check for programmatic note-on resync (set via triggerNoteOn())
-        if (modifier.pendingNoteOnResync_.exchange (false, std::memory_order_acq_rel))
-            resync (blockLength);
-
         const auto syncTypeThisBlock = juce::roundToInt (modifier.syncTypeParam->getCurrentValue());
         const auto rateTypeThisBlock = getTypedParamValue<ModifierCommon::RateType> (*modifier.rateTypeParam);
 
@@ -241,7 +237,13 @@ void LFOModifier::initialise()
 }
 
 //==============================================================================
-float LFOModifier::getCurrentValue()         { return currentValue.load (std::memory_order_acquire); }
+float LFOModifier::getCurrentValue()
+{
+    if (gated_.load (std::memory_order_acquire))
+        return 0.0f;
+
+    return currentValue.load (std::memory_order_acquire);
+}
 float LFOModifier::getCurrentPhase() const   { return currentPhase.load (std::memory_order_acquire); }
 
 AutomatableParameter::ModifierAssignment* LFOModifier::createAssignment (const juce::ValueTree& v)
@@ -259,9 +261,22 @@ void LFOModifier::applyToBuffer (const PluginRenderContext& prc)
             modifierTimer->resync (prc.bufferNumSamples / getSampleRate());
 }
 
-void LFOModifier::triggerNoteOn()
+void LFOModifier::triggerNoteOn (bool forceZeroValue)
 {
-    pendingNoteOnResync_.store (true, std::memory_order_release);
+    // Zero-delay: reset phase and recompute value immediately
+    // instead of deferring to the next updateStreamTime() block.
+    // Safe because callers (SidechainMonitorPlugin) run on the audio
+    // thread before the instrument plugin reads the assignment value.
+    gated_.store (false, std::memory_order_release);
+    modifierTimer->resync (0.0);
+
+    if (forceZeroValue)
+    {
+        // Force value=0 on the noteOn block so the instrument sees a 0→value
+        // transient on the next block (matching playback where gating creates
+        // a zero gap before each noteOn).  Only used for cross-track sidechain.
+        currentValue.store (0.0f, std::memory_order_release);
+    }
 }
 
 //==============================================================================

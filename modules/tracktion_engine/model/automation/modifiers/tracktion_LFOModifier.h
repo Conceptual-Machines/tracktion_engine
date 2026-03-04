@@ -43,9 +43,11 @@ public:
     void applyToBuffer (const PluginRenderContext&) override;
 
     /** Programmatically trigger a note-on resync (resets phase to 0 when syncType == note).
-        Thread-safe: can be called from any thread. The actual resync happens on the next audio
-        block via updateStreamTime(). */
-    void triggerNoteOn();
+        Performs an immediate resync — must be called from the audio thread.
+        @param forceZeroValue  If true, forces currentValue to 0 to create a transient gap
+                               (used for cross-track sidechain). Self-triggered LFOs should
+                               pass false to avoid killing the modulation output. */
+    void triggerNoteOn (bool forceZeroValue = true);
 
     //==============================================================================
     struct Assignment : public AutomatableParameter::ModifierAssignment
@@ -90,13 +92,19 @@ public:
 
     AutomatableParameter::Ptr waveParam, syncTypeParam, rateParam, rateTypeParam, depthParam, bipolarParam, phaseParam, offsetParam;
 
+    /** Gate the LFO output. When gated, getCurrentValue() returns 0 but the
+        internal ramp continues advancing so phase stays correct.
+        Calling triggerNoteOn() automatically clears the gate. */
+    void setGated (bool g)  { gated_.store (g, std::memory_order_release); }
+    bool isGated() const    { return gated_.load (std::memory_order_acquire); }
+
 private:
     struct LFOModifierTimer;
     std::unique_ptr<LFOModifierTimer> modifierTimer;
 
     LambdaTimer changedTimer;
     std::atomic<float> currentPhase { 0.0f }, currentValue { 0.0f };
-    std::atomic<bool> pendingNoteOnResync_ { false };
+    std::atomic<bool> gated_ { false };
 
     void valueTreeChanged() override;
 };
