@@ -98,6 +98,13 @@ public:
     void setGated (bool g)  { gated_.store (g, std::memory_order_release); }
     bool isGated() const    { return gated_.load (std::memory_order_acquire); }
 
+    /** When true, applyToBuffer() skips its native note-on resync.
+        Used for cross-track sidechain LFOs that are triggered externally
+        via triggerNoteOn() and must not respond to the destination track's
+        own MIDI. */
+    void setSkipNativeResync (bool skip)  { skipNativeResync_.store (skip, std::memory_order_release); }
+    bool getSkipNativeResync() const      { return skipNativeResync_.load (std::memory_order_acquire); }
+
 private:
     struct LFOModifierTimer;
     std::unique_ptr<LFOModifierTimer> modifierTimer;
@@ -105,6 +112,7 @@ private:
     LambdaTimer changedTimer;
     std::atomic<float> currentPhase { 0.0f }, currentValue { 0.0f };
     std::atomic<bool> gated_ { false };
+    std::atomic<bool> skipNativeResync_ { false };
 
     void valueTreeChanged() override;
 };

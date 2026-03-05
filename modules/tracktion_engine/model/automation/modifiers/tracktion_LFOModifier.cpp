@@ -256,6 +256,9 @@ void LFOModifier::applyToBuffer (const PluginRenderContext& prc)
     if (prc.bufferForMidiMessages == nullptr)
         return;
 
+    if (skipNativeResync_.load (std::memory_order_acquire))
+        return;
+
     for (auto& m : *prc.bufferForMidiMessages)
         if (m.isNoteOn())
             modifierTimer->resync (prc.bufferNumSamples / getSampleRate());
