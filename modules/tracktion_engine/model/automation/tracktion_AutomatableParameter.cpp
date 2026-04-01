@@ -1189,6 +1189,16 @@ void AutomatableParameter::updateFromAutomationSources (TimePosition time)
                                  return curveSource->getCurrentValue();
                              }
 
+                             // When modifiers are active, use the stored base value instead of
+                             // currentParameterValue. The plugin may report modulated values back
+                             // to the host (e.g. from internal LFOs), which corrupts
+                             // currentParameterValue and causes the base to drift upward each frame.
+                             // currentBaseValue is only set by setParameterValue(), which is called
+                             // from setParameter() (intentional UI changes) and from this method,
+                             // so it remains stable.
+                             if (currentModifierValue != 0.0f)
+                                 return currentBaseValue.load();
+
                              return currentParameterValue.load();
                          }();
 
@@ -1458,6 +1468,14 @@ void AutomatableParameter::setParameterValue (float value, bool isFollowingCurve
 
 void AutomatableParameter::setParameter (float value, juce::NotificationType nt)
 {
+    // Block plugin-reported value changes when modifiers (macros) are active.
+    // Without this, plugin-internal modulation (e.g. synth LFOs) causes a feedback
+    // loop: the modulated value is reported back to the host, written as the new base,
+    // then the modifier adds on top — causing the base to drift to maximum.
+    // Uses the atomic currentModifierValue for thread safety (no message-thread assert).
+    if (currentModifierValue.load() != 0.0f)
+        return;
+
     currentParameterValue = value;
     setParameterValue (value, false);
 
