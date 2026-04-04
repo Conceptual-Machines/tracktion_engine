@@ -132,8 +132,9 @@ void SlotControlNode::process (ProcessContext& pc)
     }
 
     const auto syncRange = getProcessState().getSyncRange();
+    const auto editBeatRange = getEditBeatRange();
 
-    if (const auto editBeatRange = getEditBeatRange(); ! editBeatRange.isEmpty())
+    if (! editBeatRange.isEmpty())
     {
         if (stopDuration)
         {
@@ -154,8 +155,9 @@ void SlotControlNode::process (ProcessContext& pc)
             }
         }
 
-        if (auto splitStatus = launchHandle->advance (syncRange);
-            ! splitStatus.range1.isEmpty())
+        auto splitStatus = launchHandle->advance (syncRange);
+
+        if (! splitStatus.range1.isEmpty())
         {
             // If we've just started playing, we need to check if we should have actually stopped and just cancel if so
             if (auto playedMonotonicRange = launchHandle->getPlayedMonotonicRange();
@@ -273,10 +275,20 @@ void SlotControlNode::processSection (ProcessContext& pc, BeatRange editBeatRang
 
         if (! almostEqual (lastOffset.inBeats(), offset.inBeats(), 0.0000001))
         {
-            lastOffset = offset;
+            // Detect whether this offset change is a genuine clip restart
+            // vs an arrangement loop wrap. The MIDI playback position is
+            // (editBeat - offset). At arrangement loops the position continues
+            // forward; at clip restarts it jumps backward. Only kill active
+            // MIDI notes for genuine backward jumps.
+            const auto prevMidiPos = lastEditBeatStart.inBeats() - lastOffset.inBeats();
+            const auto currMidiPos = editBeatRange.getStart().inBeats() - offset.inBeats();
+            bool isGenuineJump = (currMidiPos < prevMidiPos - 0.01);
 
-            // Force the playheadJumped state to true in order to send note-offs.
-            localPlayheadState.playheadJumped = true;
+            lastOffset = offset;
+            lastEditBeatStart = editBeatRange.getStart();
+
+            if (isGenuineJump)
+                localPlayheadState.playheadJumped = true;
 
             for (auto n : offsetNodes)
                 n->setDynamicOffsetBeats (offset);

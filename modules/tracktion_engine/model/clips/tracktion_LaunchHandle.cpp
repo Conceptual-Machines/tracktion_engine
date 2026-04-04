@@ -156,7 +156,13 @@ auto LaunchHandle::advance (const SyncRange& syncRange) -> SplitStatus
     {
         splitStatus.playing1 = playState == PlayState::playing;
         splitStatus.range1 = blockEditBeatRange;
-        splitStatus.playStartTime1 = cs ? std::optional (cs->startBeat)
+        // Derive playStartTime from monotonic beats rather than edit beats.
+        // Edit beats wrap at arrangement loop boundaries, making cs->startBeat
+        // invalid after a wrap. Monotonic beats never wrap, so this gives the
+        // correct "virtual" start position in the current edit beat cycle.
+        splitStatus.playStartTime1 = cs ? std::optional (BeatPosition::fromBeats (
+                                              blockEditBeatRange.getStart().inBeats()
+                                              - (blockMonotonicBeatRange.v.getStart() - cs->startMonotonicBeat.v).inBeats()))
                                         : std::nullopt;
 
         if (cs)
@@ -185,7 +191,9 @@ auto LaunchHandle::advance (const SyncRange& syncRange) -> SplitStatus
 
         if (auto ld = loopDuration.load())
         {
-            const auto elapsedBeats = blockEditBeatRange.getEnd() - *splitStatus.playStartTime1;
+            // Use cs->duration (accumulated from monotonic beat increments) instead
+            // of blockEditBeatRange which wraps at arrangement loop boundaries.
+            const auto elapsedBeats = cs->duration;
 
             if (elapsedBeats <= *ld)
                 return;
@@ -195,6 +203,21 @@ auto LaunchHandle::advance (const SyncRange& syncRange) -> SplitStatus
 
             const auto secondSplitLength    = BeatDuration::fromBeats (std::fmod (elapsedBeats.inBeats(), ld->inBeats()));
             const auto firstSplitLength     = duration - secondSplitLength;
+
+            if (firstSplitLength <= 0_bd)
+            {
+                // Clip loop boundary coincides with block start — no split needed.
+                // Reset state for the new loop cycle; the block plays as-is with
+                // range1 = full blockEditBeatRange (already set above).
+                splitStatus.playStartTime1 = blockEditBeatRange.getStart();
+                currentState.store (CurrentState
+                                    {
+                                        blockEditBeatRange.getStart(),
+                                        MonotonicBeat { blockMonotonicBeatRange.v.getStart() },
+                                        duration
+                                    });
+                return;
+            }
 
             splitStatus.playing1 = true;
             splitStatus.range1 = blockEditBeatRange.withLength (firstSplitLength);

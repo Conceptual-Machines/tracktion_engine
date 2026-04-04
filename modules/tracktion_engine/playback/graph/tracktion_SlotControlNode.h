@@ -57,6 +57,7 @@ private:
     LoopingMidiNode* midiNode = nullptr;
     std::shared_ptr<std::vector<float>> lastSamples;
     BeatDuration lastOffset;
+    BeatPosition lastEditBeatStart;
 
     void processSplitSection (ProcessContext&, LaunchHandle::SplitStatus);
     void processSection (ProcessContext&, BeatRange editBeatRange, TimeRange editTimeRange, BeatRange clipBeatRange,
