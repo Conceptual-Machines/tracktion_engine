@@ -29,6 +29,8 @@ struct LFOModifier::LFOModifierTimer    : public ModifierTimer
 
         const float rateThisBlock = modifier.rateParam->getCurrentValue();
 
+        float phaseBefore = modifier.currentPhase.load (std::memory_order_relaxed);
+
         if (rateTypeThisBlock == ModifierCommon::hertz)
         {
             const float durationPerPattern = 1.0f / rateThisBlock;
@@ -73,6 +75,20 @@ struct LFOModifier::LFOModifierTimer    : public ModifierTimer
                 // Move the ramp on for the next block
                 ramp.process ((float) blockLength);
             }
+        }
+
+        float phaseAfter = modifier.currentPhase.load (std::memory_order_relaxed);
+        float valueAfter = modifier.currentValue.load (std::memory_order_relaxed);
+        // Log every ~5 seconds (430 blocks at 44100/512)
+        if (++updateLogCount_ % 430 == 0)
+        {
+            DBG ("[TE-UPDATE] phase: " << phaseBefore << " -> " << phaseAfter
+                 << " value=" << valueAfter
+                 << " syncType=" << syncTypeThisBlock
+                 << " rate=" << rateThisBlock
+                 << " rateType=" << (int) rateTypeThisBlock
+                 << " gated=" << (int) modifier.gated_.load (std::memory_order_relaxed)
+                 << " rampProp=" << ramp.getProportion());
         }
     }
 
@@ -137,11 +153,20 @@ struct LFOModifier::LFOModifierTimer    : public ModifierTimer
 
         if (type == ModifierCommon::note)
         {
+            float rampPosBefore = ramp.getProportion();
             ramp.setPosition (0.0f);
             setPhase (0.0f);
 
             // Move the ramp on for the next block
             ramp.process ((float) duration);
+            DBG ("[TE-RESYNC] rampProportion: " << rampPosBefore << " -> " << ramp.getProportion()
+                 << " duration=" << duration
+                 << " phase=" << modifier.currentPhase.load (std::memory_order_relaxed)
+                 << " value=" << modifier.currentValue.load (std::memory_order_relaxed));
+        }
+        else
+        {
+            DBG ("[TE-RESYNC] SKIPPED — syncType=" << type << " (not note)");
         }
     }
 
@@ -151,6 +176,7 @@ struct LFOModifier::LFOModifierTimer    : public ModifierTimer
 
     juce::Random rand;
     float previousRandom = 0.0f, currentRandom = 0.0f, randomDifference = 0.0f;
+    int updateLogCount_ = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LFOModifierTimer)
 };
@@ -260,26 +286,50 @@ void LFOModifier::applyToBuffer (const PluginRenderContext& prc)
         return;
 
     for (auto& m : *prc.bufferForMidiMessages)
+    {
         if (m.isNoteOn())
-            modifierTimer->resync (prc.bufferNumSamples / getSampleRate());
+        {
+            float phaseBefore = currentPhase.load (std::memory_order_relaxed);
+            float valueBefore = currentValue.load (std::memory_order_relaxed);
+            double dur = prc.bufferNumSamples / getSampleRate();
+            modifierTimer->resync (dur);
+            float phaseAfter = currentPhase.load (std::memory_order_relaxed);
+            float valueAfter = currentValue.load (std::memory_order_relaxed);
+            DBG ("[TE-NATIVE-RESYNC] phase: " << phaseBefore << " -> " << phaseAfter
+                 << " value: " << valueBefore << " -> " << valueAfter
+                 << " dur=" << dur
+                 << " syncType=" << juce::roundToInt (syncTypeParam->getCurrentValue())
+                 << " gated=" << (int) gated_.load (std::memory_order_relaxed));
+            break;
+        }
+    }
 }
 
 void LFOModifier::triggerNoteOn (bool forceZeroValue)
 {
-    // Zero-delay: reset phase and recompute value immediately
-    // instead of deferring to the next updateStreamTime() block.
-    // Safe because callers (SidechainMonitorPlugin) run on the audio
-    // thread before the instrument plugin reads the assignment value.
+    float phaseBefore = currentPhase.load (std::memory_order_relaxed);
+    float valueBefore = currentValue.load (std::memory_order_relaxed);
+    bool wasGated = gated_.load (std::memory_order_relaxed);
+
     gated_.store (false, std::memory_order_release);
     modifierTimer->resync (0.0);
 
+    float phaseAfterResync = currentPhase.load (std::memory_order_relaxed);
+    float valueAfterResync = currentValue.load (std::memory_order_relaxed);
+
     if (forceZeroValue)
     {
-        // Force value=0 on the noteOn block so the instrument sees a 0→value
-        // transient on the next block (matching playback where gating creates
-        // a zero gap before each noteOn).  Only used for cross-track sidechain.
         currentValue.store (0.0f, std::memory_order_release);
     }
+
+    DBG ("[TE-TRIGGER-NOTEON] phase: " << phaseBefore << " -> " << phaseAfterResync
+         << " value: " << valueBefore << " -> " << valueAfterResync
+         << " forceZero=" << (int) forceZeroValue
+         << " wasGated=" << (int) wasGated
+         << " syncType=" << juce::roundToInt (syncTypeParam->getCurrentValue())
+         << " skipNative=" << (int) skipNativeResync_.load (std::memory_order_relaxed)
+         << " rate=" << rateParam->getCurrentValue()
+         << " depth=" << depthParam->getCurrentValue());
 }
 
 //==============================================================================
