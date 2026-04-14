@@ -181,10 +181,39 @@ bool Track::isProcessing (bool includeParents) const
 
 bool Track::isTrackAudible (bool areAnyTracksSolo) const
 {
-    if (areAnyTracksSolo && ! (isSolo (true) || isSoloIsolate (true)))
-        return false;
+    // ── Audibility policy ────────────────────────────────────────────
+    //
+    //  1. Inherited mute is absolute  (folder/destination mute)
+    //  2. Solo overrides self-mute
+    //  3. Other track soloed silences non-soloed tracks
+    //  4. Otherwise self-mute applies
+    //
+    // ─────────────────────────────────────────────────────────────────
 
-    return ! isMuted (true);
+    const bool selfMuted     = isMuted (false);
+    const bool selfSoloed    = isSolo (true) || isSoloIsolate (true);
+    const bool otherSoloed   = areAnyTracksSolo && ! selfSoloed;
+    const bool inheritedMute = isInheritedMute();
+
+    if (inheritedMute)   return false;
+    if (selfSoloed)      return true;
+    if (otherSoloed)     return false;
+
+    return ! selfMuted;
+}
+
+bool Track::isInheritedMute() const
+{
+    if (auto* parent = getParentFolderTrack())
+        if (parent->isMuted (true))
+            return true;
+
+    if (auto* at = dynamic_cast<const AudioTrack*> (this))
+        if (auto* dest = at->getOutput().getDestinationTrack())
+            if (dest->isMuted (true))
+                return true;
+
+    return false;
 }
 
 void Track::updateAudibility (bool areAnyTracksSolo)

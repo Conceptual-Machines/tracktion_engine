@@ -434,6 +434,10 @@ private:
     void updateTrackList();
     void updateCachedParent();
 
+    /** Returns true if the track is muted by its parent folder or destination
+        track, ignoring this track's own mute button. */
+    bool isInheritedMute() const;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Track)
 };
 
