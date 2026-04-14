@@ -1093,6 +1093,10 @@ std::unique_ptr<tracktion::graph::Node> createNodeForFrozenAudioTrack (AudioTrac
     if (isSidechainSource (track))
         node = makeNode<SendNode> (std::move (node), getSidechainBusID (track.itemID));
 
+    // Pre-mute metering tap: measure signal before TrackMutingNode silences it
+    if (auto* meterPlugin = track.getLevelMeterPlugin())
+        node = makeNode<LevelMeasurerProcessingNode> (std::move (node), *meterPlugin);
+
     node = makeNode<TrackMutingNode> (std::move (trackMuteState), std::move (node), false);
 
     return node;
@@ -1353,9 +1357,10 @@ std::unique_ptr<tracktion::graph::Node> createPluginNodeForList (PluginList& lis
         if (! params.forRendering && p->isFrozen())
             continue;
 
-        if (auto meterPlugin = dynamic_cast<LevelMeterPlugin*> (p))
+        if (dynamic_cast<LevelMeterPlugin*> (p))
         {
-            node = makeNode<LevelMeasurerProcessingNode> (std::move (node), *meterPlugin);
+            // Skip — metering is injected as a pre-mute tap in createNodeForAudioTrack
+            continue;
         }
         else if (auto sendPlugin = dynamic_cast<AuxSendPlugin*> (p))
         {
@@ -1522,14 +1527,10 @@ std::unique_ptr<tracktion::graph::Node> createNodeForAudioTrack (AudioTrack& at,
         // When recording, clips should be muted but the plugin should still be audible so use two muting Nodes
         node = makeNode<TrackMutingNode> (std::move (clipsMuteState), std::move (node), true);
 
-        // If we have any inputs, we need a third muting Node to fully block the clips whilst recording
-        // The above muting node will still let clips sound if they are going to a aux send, sidechain etc.
-        if (at.edit.engine.getEngineBehaviour().shouldProcessMutedTracks()
-            && ! at.edit.getEditInputDevices().getDevicesForTargetTrack (at).isEmpty())
-        {
-            node = makeNode<TrackMutingNode> (std::make_unique<TrackMuteState> (at, true, processMidiWhenMuted),
-                                              std::move (node), false);
-        }
+        // NOTE: TE normally adds a second muting node here to fully block clips
+        // whilst recording when shouldProcessMutedTracks() is true. We skip it
+        // because it also silences clips on muted (non-recording) tracks, which
+        // kills the signal before the instrument plugin and breaks pre-mute metering.
 
         node = createTrackCompNode (at, std::move (node), params);
     }
@@ -1591,6 +1592,10 @@ std::unique_ptr<tracktion::graph::Node> createNodeForAudioTrack (AudioTrack& at,
 
     if (isSidechainSource (at))
         node = makeNode<SendNode> (std::move (node), getSidechainBusID (at.itemID));
+
+    // Pre-mute metering tap: measure signal before TrackMutingNode silences it
+    if (auto* meterPlugin = at.getLevelMeterPlugin())
+        node = makeNode<LevelMeasurerProcessingNode> (std::move (node), *meterPlugin);
 
     node = makeNode<TrackMutingNode> (std::move (trackMuteState), std::move (node), false);
 
