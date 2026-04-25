@@ -36,7 +36,10 @@ namespace ModifierCommon
         thirtySecondD,
         sixtyFourthT,
         sixtyFourth,
-        sixtyFourthD
+        sixtyFourthD,
+        // Appended at end so existing serialized ordinals stay stable.
+        eightBars,
+        sixteenBars
     };
 
     inline juce::StringArray getRateTypeChoices()
@@ -62,7 +65,9 @@ namespace ModifierCommon
                  TRANS("1/32 D"),
                  TRANS("1/64 T"),
                  TRANS("1/64"),
-                 TRANS("1/64 D") };
+                 TRANS("1/64 D"),
+                 TRANS("8 Bars"),
+                 TRANS("16 Bars") };
     }
 
     /** Returns the fraction of a bar to be used for a given rate type. */

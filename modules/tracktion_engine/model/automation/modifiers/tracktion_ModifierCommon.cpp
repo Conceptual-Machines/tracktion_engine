@@ -20,6 +20,8 @@ namespace ModifierCommon
 
         switch (rt)
         {
+            case sixteenBars:   return 16.0;
+            case eightBars:     return 8.0;
             case fourBars:      return 4.0;
             case twoBars:       return 2.0;
             case bar:           return 1.0;
