@@ -142,7 +142,7 @@ struct BreakpointOscillatorModifier::BreakpointOscillatorModifierTimer    : publ
                 const auto editTimeInBeats = tempoSequence.getBeats().inBeats();
                 const auto bars = (editTimeInBeats / currentTimeSig.numerator) * rateThisBlock;
 
-                if (rateTypeThisBlock >= fourBars && rateTypeThisBlock <= sixtyFourthD)
+                if (rateTypeThisBlock >= sixteenBars && rateTypeThisBlock <= sixtyFourthT)
                 {
                     auto virtualBars = std::max (0.0, bars / proportionOfBar);
                     modifier.setPhase ((float) std::fmod (virtualBars, 1.0f));

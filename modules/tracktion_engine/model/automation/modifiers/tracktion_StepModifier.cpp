@@ -56,7 +56,7 @@ struct StepModifier::StepModifierTimer : public ModifierTimer
                 const auto editTimeInBeats = tempoSequence.getBeats().inBeats();
                 const auto bars = (editTimeInBeats / currentTimeSig.numerator) * rateThisBlock;
 
-                if (rateTypeThisBlock >= ModifierCommon::fourBars && rateTypeThisBlock <= ModifierCommon::sixtyFourthD)
+                if (rateTypeThisBlock >= ModifierCommon::sixteenBars && rateTypeThisBlock <= ModifierCommon::sixtyFourthT)
                 {
                     const double virtualBars = bars / proportionOfBar;
                     const int step = static_cast<int> (std::fmod (virtualBars, numStepsThisBlock));
