@@ -1473,9 +1473,16 @@ void AutomatableParameter::setParameter (float value, juce::NotificationType nt)
     // loop: the modulated value is reported back to the host, written as the new base,
     // then the modifier adds on top — causing the base to drift to maximum.
     // Uses the atomic currentModifierValue for thread safety (no message-thread assert).
+    // Host-initiated writes (UI sliders, controllers, automation playback) must
+    // call setParameterFromHost instead so they don't get caught by this guard.
     if (currentModifierValue.load() != 0.0f)
         return;
 
+    setParameterFromHost (value, nt);
+}
+
+void AutomatableParameter::setParameterFromHost (float value, juce::NotificationType nt)
+{
     currentParameterValue = value;
     setParameterValue (value, false);
 

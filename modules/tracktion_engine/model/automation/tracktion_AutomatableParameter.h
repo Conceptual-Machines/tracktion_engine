@@ -77,6 +77,17 @@ public:
 
     // should be called to change a parameter when a user is actively moving it
     void setParameter (float value, juce::NotificationType);
+
+    /** Host-initiated value write. Bypasses the modifier-active guard that
+        setParameter() uses to drop suspected plugin-echo callbacks (the
+        feedback-loop fix from a2ac9e8acd1). The host knows this call
+        originates from UI / controller / automation playback — not a
+        plugin echoing its own modulated value back through the param
+        callback — so it's safe to update the base value while a modifier
+        is producing output.
+    */
+    void setParameterFromHost (float value, juce::NotificationType);
+
     void setNormalisedParameter (float value, juce::NotificationType);
     void updateToFollowCurve (TimePosition);
 
