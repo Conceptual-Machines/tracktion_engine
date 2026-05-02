@@ -319,6 +319,7 @@ void AudioClipBase::cloneFrom (Clip* c)
         channels            .setValue (other->channels, nullptr);
         fadeIn              .setValue (other->fadeIn, nullptr);
         fadeOut             .setValue (other->fadeOut, nullptr);
+        loopCrossfade       .setValue (other->loopCrossfade, nullptr);
         fadeInType          .setValue (other->fadeInType, nullptr);
         fadeOutType         .setValue (other->fadeOutType, nullptr);
         autoCrossfade       .setValue (other->autoCrossfade, nullptr);
@@ -2355,6 +2356,7 @@ void AudioClipBase::valueTreePropertyChanged (juce::ValueTree& tree, const juce:
         if (id == IDs::fadeInType || id == IDs::fadeOutType
             || id == IDs::fadeInBehaviour || id == IDs::fadeOutBehaviour
             || id == IDs::fadeIn || id == IDs::fadeOut
+            || id == IDs::loopCrossfade
             || id == IDs::loopStart || id == IDs::loopLength
             || id == IDs::loopStartBeats || id == IDs::loopLengthBeats
             || id == IDs::transpose || id == IDs::pitchChange

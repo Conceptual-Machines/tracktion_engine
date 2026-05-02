@@ -1321,7 +1321,21 @@ private:
                                               regionEditDuration,
                                               isContiguous,
                                               playbackSpeedRatio);
-            (void) headOk;  // best effort — silence on cache miss is preferable to skipping the blend
+
+            // The side-read above seeked the shared reader chain to the loop
+            // head and ran resampler / time-stretcher state forward over the
+            // head audio. Without resetting, that state — in particular the
+            // Lagrange interpolator's history buffer — would leak into the
+            // next block's main read (whose setPosition does not reset
+            // interpolation state). Reset the chain here so the next call to
+            // source->read on the contiguous tail starts from a clean slate.
+            source->reset();
+
+            // Skip the blend on a failed side-read rather than mixing silence
+            // into the faded-out tail — that would turn a cache miss into an
+            // audible seam dropout instead of a one-block stitch artefact.
+            if (! headOk)
+                continue;
 
             // Equal-power blend: dest *= cos(α·π/2), head *= sin(α·π/2), then sum.
             // α = (linearPos - (seam - cfBeats)) / cfBeats, ∈ [0,1) across the region.
