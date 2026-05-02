@@ -1167,11 +1167,17 @@ class BeatRangeReader final : public AudioReader
 public:
     BeatRangeReader (std::unique_ptr<TimeRangeReader> input,
                      BeatRange loopRange_,
+                     BeatDuration crossfade_,
                      BeatDuration offset_,
                      std::shared_ptr<BeatDuration> dynamicOffset_,
                      tempo::Sequence::Position sourceSequencePosition_)
         : source (std::move (input)),
-          loopRange (loopRange_), offset (offset_),
+          loopRange (loopRange_),
+          // Cap to half the loop length so two crossfade regions never overlap.
+          crossfade (juce::jlimit (BeatDuration(),
+                                   BeatDuration::fromBeats (loopRange_.getLength().inBeats() * 0.5),
+                                   crossfade_)),
+          offset (offset_),
           dynamicOffset (std::move (dynamicOffset_)),
           sourceSequencePosition (sourceSequencePosition_)
     {
@@ -1187,7 +1193,20 @@ public:
         // Apply offset first
         const auto beatRangeToRead = br + offset - *dynamicOffset;
 
-        return readLoopedBeatRange (beatRangeToRead, destBuffer, editDuration, isContiguous, playbackSpeedRatio);
+        const bool ok = readLoopedBeatRange (beatRangeToRead, destBuffer, editDuration, isContiguous, playbackSpeedRatio);
+
+        // Equal-power crossfade at the loop seam.
+        // We pre-mix: the LAST `crossfade` beats of each loop cycle are blended
+        // with the corresponding `crossfade` beats from the START of the loop.
+        // That way every cycle still outputs `loopRange.getLength()` beats of
+        // audio (no listener-visible pitch / period change), but the seam is
+        // smooth instead of stitched. Effectively the source's first N samples
+        // are heard twice per cycle — once at the start, once mixed into the
+        // tail — which is the standard approach for sustained-tail material.
+        if (ok && crossfade > 0_bd && ! loopRange.isEmpty())
+            applySeamCrossfade (beatRangeToRead, destBuffer, editDuration, isContiguous, playbackSpeedRatio);
+
+        return ok;
     }
 
     choc::buffer::ChannelCount getNumChannels() override    { return source->getNumChannels(); }
@@ -1205,9 +1224,140 @@ public:
 private:
     std::unique_ptr<TimeRangeReader> source;
     const BeatRange loopRange;
+    const BeatDuration crossfade;
     const BeatDuration offset;
     std::shared_ptr<BeatDuration> dynamicOffset;
     tempo::Sequence::Position sourceSequencePosition;
+
+    // Scratch buffer for reading the loop-head samples used in the crossfade
+    // mix. Allocated lazily in applySeamCrossfade() and reused; resized only
+    // when channel count or block size grows.
+    choc::buffer::ChannelArrayBuffer<float> headScratch;
+
+    // Maps a linear beat position (already adjusted for offset/dynamicOffset)
+    // back to the proportion (0..1) it represents within `linearRange`.
+    static inline double linearProportion (BeatPosition pos, BeatRange linearRange)
+    {
+        const auto t = (pos - linearRange.getStart()).inBeats();
+        const auto len = linearRange.getLength().inBeats();
+        return len > 0.0 ? t / len : 0.0;
+    }
+
+    void applySeamCrossfade (BeatRange linearBeatRange,
+                             choc::buffer::ChannelArrayView<float>& destBuffer,
+                             TimeDuration editDuration,
+                             bool isContiguous,
+                             double playbackSpeedRatio)
+    {
+        using choc::buffer::FrameCount;
+
+        const auto loopLenBeats = loopRange.getLength().inBeats();
+        const auto cfBeats      = crossfade.inBeats();
+
+        if (loopLenBeats <= 0.0 || cfBeats <= 0.0)
+            return;
+
+        // Walk every loop seam that intersects this read. For each, the
+        // crossfade zone is [seam - cfBeats, seam) in linear coordinates.
+        const auto loopStartBeatsD = loopRange.getStart().inBeats();
+        const auto rangeStartBeats = linearBeatRange.getStart().inBeats();
+        const auto rangeEndBeats   = linearBeatRange.getEnd().inBeats();
+
+        // Index of the first seam strictly after rangeStart.
+        const auto firstK = static_cast<int64_t> (std::floor ((rangeStartBeats - loopStartBeatsD) / loopLenBeats)) + 1;
+        // Last seam that could affect us is the one just past rangeEnd.
+        const auto lastK  = static_cast<int64_t> (std::ceil  ((rangeEndBeats   - loopStartBeatsD) / loopLenBeats));
+
+        for (auto k = firstK; k <= lastK; ++k)
+        {
+            const auto seamLinear = loopStartBeatsD + static_cast<double> (k) * loopLenBeats;
+            const auto cfRegionStart = std::max (seamLinear - cfBeats, rangeStartBeats);
+            const auto cfRegionEnd   = std::min (seamLinear,            rangeEndBeats);
+
+            if (cfRegionEnd <= cfRegionStart)
+                continue;
+
+            // Frame range in dest buffer covered by this crossfade region.
+            const auto p0 = linearProportion (BeatPosition::fromBeats (cfRegionStart), linearBeatRange);
+            const auto p1 = linearProportion (BeatPosition::fromBeats (cfRegionEnd),   linearBeatRange);
+            const auto totalFrames = static_cast<int64_t> (destBuffer.getNumFrames());
+            const auto frameStart = static_cast<FrameCount> (std::llround (p0 * totalFrames));
+            const auto frameEnd   = static_cast<FrameCount> (std::llround (p1 * totalFrames));
+
+            if (frameEnd <= frameStart)
+                continue;
+
+            const auto numFrames = frameEnd - frameStart;
+
+            // The portion of the loop's HEAD that we need to read for this region:
+            // a sample at linear position (seam - cfBeats + dx) blends with the
+            // loop-head sample at (loopStart + dx). dx ranges over [0, cfBeats).
+            const auto headStartBeats = loopStartBeatsD + (cfRegionStart - (seamLinear - cfBeats));
+            const auto headEndBeats   = loopStartBeatsD + (cfRegionEnd   - (seamLinear - cfBeats));
+
+            // Convert to source time. sourceSequencePosition maps beats → seconds
+            // in the SOURCE file's tempo domain — that's what TimeRangeReader expects.
+            sourceSequencePosition.set (BeatPosition::fromBeats (headStartBeats));
+            const auto headStartTime = sourceSequencePosition.getTime();
+            sourceSequencePosition.set (BeatPosition::fromBeats (headEndBeats));
+            const auto headEndTime   = sourceSequencePosition.getTime();
+
+            // Resize scratch if needed, then read head samples.
+            const auto numChannels = destBuffer.getNumChannels();
+            if (headScratch.getNumChannels() < numChannels
+                || headScratch.getNumFrames() < numFrames)
+            {
+                headScratch.resize ({ numChannels, std::max (numFrames, headScratch.getNumFrames()) });
+            }
+
+            auto headView = headScratch.getView().getStart (numFrames);
+            headView.clear();
+
+            // editDuration scales with the proportion of the read this region covers.
+            const auto regionEditDuration = editDuration * (p1 - p0);
+
+            const bool headOk = source->read ({ headStartTime, headEndTime },
+                                              headView,
+                                              regionEditDuration,
+                                              isContiguous,
+                                              playbackSpeedRatio);
+
+            // The side-read above seeked the shared reader chain to the loop
+            // head and ran resampler / time-stretcher state forward over the
+            // head audio. Without resetting, that state — in particular the
+            // Lagrange interpolator's history buffer — would leak into the
+            // next block's main read (whose setPosition does not reset
+            // interpolation state). Reset the chain here so the next call to
+            // source->read on the contiguous tail starts from a clean slate.
+            source->reset();
+
+            // Skip the blend on a failed side-read rather than mixing silence
+            // into the faded-out tail — that would turn a cache miss into an
+            // audible seam dropout instead of a one-block stitch artefact.
+            if (! headOk)
+                continue;
+
+            // Equal-power blend: dest *= cos(α·π/2), head *= sin(α·π/2), then sum.
+            // α = (linearPos - (seam - cfBeats)) / cfBeats, ∈ [0,1) across the region.
+            const auto alpha0 = (cfRegionStart - (seamLinear - cfBeats)) / cfBeats;
+            const auto alpha1 = (cfRegionEnd   - (seamLinear - cfBeats)) / cfBeats;
+            const auto kHalfPi = juce::MathConstants<double>::halfPi;
+
+            for (choc::buffer::ChannelCount ch = 0; ch < numChannels; ++ch)
+            {
+                auto destPtr = destBuffer.getIterator (ch).sample + frameStart;
+                auto headPtr = headView.getIterator (ch).sample;
+
+                for (FrameCount i = 0; i < numFrames; ++i)
+                {
+                    const auto a = alpha0 + (alpha1 - alpha0) * (static_cast<double> (i) / static_cast<double> (numFrames));
+                    const auto gOut = static_cast<float> (std::cos (a * kHalfPi));
+                    const auto gIn  = static_cast<float> (std::sin (a * kHalfPi));
+                    destPtr[i] = destPtr[i] * gOut + headPtr[i] * gIn;
+                }
+            }
+        }
+    }
 
     bool readLoopedBeatRange (BeatRange br,
                               choc::buffer::ChannelArrayView<float>& destBuffer,
@@ -1867,6 +2017,7 @@ WaveNodeRealTime::WaveNodeRealTime (BeatConfig c)
       editPositionBeats (c.editTime),
       loopSectionBeats (c.loopSection),
       offsetBeats (c.offset),
+      loopCrossfadeBeats (c.loopCrossfade),
       editItemID (c.itemID),
       isOfflineRender (c.isOfflineRender),
       resamplingQuality (c.resamplingQuality),
@@ -1901,6 +2052,7 @@ WaveNodeRealTime::WaveNodeRealTime (BeatConfig c)
     hash_combine (stateHash, removeRoundingError (editPositionBeats.getEnd()));
     hash_combine (stateHash, removeRoundingError (loopSectionBeats.getStart()));
     hash_combine (stateHash, removeRoundingError (loopSectionBeats.getEnd()));
+    hash_combine (stateHash, removeRoundingError (loopCrossfadeBeats));
     hash_combine (stateHash, removeRoundingError (offsetBeats));
     hash_combine (stateHash, editItemID.getRawID());
     hash_combine (stateHash, channelsToUse.size());
@@ -1986,6 +2138,7 @@ WaveNodeRealTime::WaveNodeRealTime (const AudioFile& af,
     hash_combine (stateHash, removeRoundingError (editPositionBeats.getEnd()));
     hash_combine (stateHash, removeRoundingError (loopSectionBeats.getStart()));
     hash_combine (stateHash, removeRoundingError (loopSectionBeats.getEnd()));
+    hash_combine (stateHash, removeRoundingError (loopCrossfadeBeats));
     hash_combine (stateHash, removeRoundingError (offsetBeats));
     hash_combine (stateHash, editItemID.getRawID());
     hash_combine (stateHash, channelsToUse.size());
@@ -2164,7 +2317,8 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
     {
         assert (fileTempoSequence);
         auto beatRangeReader    = std::make_unique<BeatRangeReader> (std::move (timeRangeReader),
-                                                                     loopSectionBeats, offsetBeats, dynamicOffsetBeats, *fileTempoPosition);
+                                                                     loopSectionBeats, loopCrossfadeBeats,
+                                                                     offsetBeats, dynamicOffsetBeats, *fileTempoPosition);
         auto editToClipBeatReader    = std::make_unique<EditToClipBeatReader> (std::move (beatRangeReader), editPositionBeats, dynamicOffsetBeats);
         basicEditReader = std::make_unique<EditReader> (std::move (editToClipBeatReader), nullptr);
     }
