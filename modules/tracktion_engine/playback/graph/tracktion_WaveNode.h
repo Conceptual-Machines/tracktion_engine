@@ -144,6 +144,9 @@ public:
         BeatRange editTime;
         BeatDuration offset;
         BeatRange loopSection;
+        // Equal-power crossfade duration applied at the loop seam. 0 = none.
+        // Capped at half the loopSection length when applied.
+        BeatDuration loopCrossfade;
         LiveClipLevel liveClipLevel;
         juce::AudioChannelSet sourceChannelsToUse;
         juce::AudioChannelSet destChannelsToFill;
@@ -214,6 +217,7 @@ private:
     //==============================================================================
     BeatRange editPositionBeats, loopSectionBeats;
     BeatDuration offsetBeats;
+    BeatDuration loopCrossfadeBeats;
     TimeRange editPositionTime, loopSectionTime;
     TimeDuration offsetTime;
     const double speedRatio = 1.0;

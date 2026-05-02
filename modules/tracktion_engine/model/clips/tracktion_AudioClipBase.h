@@ -179,6 +179,19 @@ public:
     /** Returns the fade out duration in seconds. */
     TimeDuration getFadeOut() const;
 
+    /** Sets the loop-seam crossfade duration.
+        When > 0 and the clip is looping, the last N samples of each loop
+        cycle are equal-power blended with the first N samples of the next
+        cycle, smoothing the seam without changing the audible loop length.
+        0 (default) leaves the seam stitched hard, matching prior behaviour.
+        Capped at half the loop length so two crossfade regions never overlap.
+        Currently honoured only for the launcher (session-view) playback path
+        — arrangement clips and warped clips render the seam without it.
+    */
+    void setLoopCrossfade (TimeDuration length);
+    /** Returns the loop-seam crossfade duration. 0 means no crossfade. */
+    TimeDuration getLoopCrossfade() const noexcept              { return loopCrossfade; }
+
     /** Sets the curve shape for the fade in to use. */
     void setFadeInType (AudioFadeCurve::Type);
     /** Returns the curve shape for the fade in to use. */
@@ -628,6 +641,7 @@ protected:
 
     juce::CachedValue<TimeDuration> fadeIn, fadeOut;
     TimeDuration autoFadeIn, autoFadeOut;
+    juce::CachedValue<TimeDuration> loopCrossfade;
     juce::CachedValue<AudioFadeCurve::Type> fadeInType, fadeOutType;
     juce::CachedValue<bool> autoCrossfade;
     juce::CachedValue<FadeBehaviour> fadeInBehaviour, fadeOutBehaviour;

@@ -608,6 +608,18 @@ std::unique_ptr<tracktion::graph::Node> createNodeForAudioClip (AudioClipBase& c
 
             if (role == ClipRole::launcher)
             {
+                // Convert clip's seconds-domain loopCrossfade to project-beat
+                // duration using the edit's tempo at the time of graph build.
+                // BeatRangeReader operates post-stretch (project beats), so
+                // the conversion uses edit BPM, not source BPM.
+                BeatDuration loopCrossfadeBeats;
+                if (auto cf = clip.getLoopCrossfade(); cf > TimeDuration())
+                {
+                    auto bpm = clip.edit.tempoSequence.getBpmAt (TimePosition());
+                    if (bpm > 0.0)
+                        loopCrossfadeBeats = BeatDuration::fromBeats (cf.inSeconds() * bpm / 60.0);
+                }
+
                 WaveNodeRealTime::BeatConfig config
                 {
                     .processState = params.processState,
@@ -617,6 +629,7 @@ std::unique_ptr<tracktion::graph::Node> createNodeForAudioClip (AudioClipBase& c
                     .editTime = BeatRange (0_bp, BeatPosition::fromBeats (std::numeric_limits<double>::max())),
                     .offset = clip.getOffsetInBeats(),
                     .loopSection = clip.getLoopRangeBeats(),
+                    .loopCrossfade = loopCrossfadeBeats,
                     .liveClipLevel = clip.getLiveClipLevel(),
                     .sourceChannelsToUse = clip.getActiveChannels(),
                     .destChannelsToFill = juce::AudioChannelSet::canonicalChannelSet (std::max (2, clip.getActiveChannels().size())),
