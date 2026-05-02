@@ -409,6 +409,64 @@ private:
                 expectAudioBuffer (*this, testContext->buffer, 0, toSamples ({ 1.9_tp, 2.0_tp }, ts.sampleRate), 1.0f, 1.0f);
             }
         }
+
+        // Regression for TE #8: looping a clip with autoTempo through the time-stretcher
+        // used to leak audio from outside the loop region into the loop tail (the FFT
+        // analysis window pulled samples past loopEnd — which the cache reader served
+        // by wrapping back to loopStart, smearing the loop-start transient into the
+        // loop tail). The source-feed gate in LoopReader fixes this by feeding silence
+        // past loopEnd, leaving BeatRangeReader's split read to bring in the next cycle
+        // cleanly. We construct a file that is silent everywhere except for a single
+        // unit transient at sample 0 — which is loopStart for the loop region — and
+        // assert that the loop tail (the half of the cycle that should be silent)
+        // stays quiet across multiple cycles.
+        if constexpr (TimeStretcher::defaultMode != TimeStretcher::soundtouchBetter
+                       && TimeStretcher::defaultMode != TimeStretcher::disabled)
+        {
+            beginTest ("WaveNodeRealTime loop autoTempo: no transient bleed past loopEnd");
+            {
+                auto transientFile = getTransientFile<juce::WavAudioFormat> (ts.sampleRate, fileLength,
+                                                                              TimePosition(), 1.0f);
+                AudioFile transientAudioFile (engine, transientFile->getFile());
+
+                auto node = std::make_unique<WaveNodeRealTime> (transientAudioFile,
+                                                                TimeStretcher::defaultMode,
+                                                                TimeStretcher::ElastiqueProOptions(),
+                                                                BeatRange (0_bp, fileLengthBeats * 3.0),
+                                                                0_bd,
+                                                                BeatRange (0_bp, fileLengthBeats),
+                                                                LiveClipLevel(),
+                                                                juce::AudioChannelSet::canonicalChannelSet (transientAudioFile.getNumChannels()),
+                                                                juce::AudioChannelSet::canonicalChannelSet (1),
+                                                                processState,
+                                                                EditItemID(),
+                                                                true,
+                                                                ResamplingQuality::lagrange,
+                                                                SpeedFadeDescription(),
+                                                                std::nullopt,
+                                                                std::nullopt,
+                                                                fileTempoSequence,
+                                                                WaveNodeRealTime::SyncTempo::yes,
+                                                                WaveNodeRealTime::SyncPitch::no,
+                                                                std::nullopt);
+
+                auto testContext = createTracktionTestContext (processState, std::move (node), ts, 1, (fileLength * 3.0).inSeconds());
+
+                // The transient lives at output time 0, fileLength, 2*fileLength (start of each
+                // cycle). The half-loop *before* each wrap (e.g. [0.5*fileLength, fileLength]) is
+                // where wrap-induced FFT bleed surfaces. Allow a small tolerance for the
+                // stretcher's analysis-window taper, but flag any clearly-audible content.
+                const auto halfLen = fileLength * 0.5;
+
+                expectAudioBuffer (*this, testContext->buffer, 0,
+                                   toSamples ({ toPosition (halfLen), toPosition (fileLength) }, ts.sampleRate),
+                                   0.05f, 0.05f);
+
+                expectAudioBuffer (*this, testContext->buffer, 0,
+                                   toSamples ({ toPosition (fileLength) + halfLen, toPosition (fileLength * 2.0) }, ts.sampleRate),
+                                   0.05f, 0.05f);
+            }
+        }
     }
 };
 

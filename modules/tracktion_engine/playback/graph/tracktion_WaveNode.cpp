@@ -158,16 +158,38 @@ public:
 };
 
 //==============================================================================
+/** Maps an unbounded read position into a finite loop region.
+
+    Mode::wrap (default, legacy behaviour): when a read crosses loopEnd, the
+    reader wraps to loopStart and continues, splicing the loop tail and head
+    into a single buffer. Required for callers that do not split reads at the
+    loop boundary themselves (e.g. EditToClipTimeReader).
+
+    Mode::gate: when a read crosses loopEnd, the past-boundary portion of the
+    destination buffer is filled with silence and the read does not advance
+    into wrapped data. Required upstream of a phase-vocoder time-stretcher: the
+    stretcher's analysis window pulls samples beyond its current input position
+    into the FFT, and any wrapped data leaks into the loop tail as bleed (TE
+    issue #8). The caller (BeatRangeReader in WaveNodeRealTime) is expected to
+    split reads at the loop boundary and setPosition into the next cycle, at
+    which point the gate disengages.
+*/
 class LoopReader final  : public SingleInputAudioReader
 {
 public:
-    LoopReader (std::unique_ptr<AudioReader> input, SampleRange loopRangeToUse)
-        : SingleInputAudioReader (std::move (input)), loopRange (loopRangeToUse)
+    enum class Mode { wrap, gate };
+
+    LoopReader (std::unique_ptr<AudioReader> input, SampleRange loopRangeToUse, Mode m = Mode::wrap)
+        : SingleInputAudioReader (std::move (input)), loopRange (loopRangeToUse), mode (m),
+          gatedPosition (loopRangeToUse.getStart())
     {
     }
 
-    LoopReader (std::unique_ptr<AudioReader> input, TimeRange loopRangeToUse)
-        : SingleInputAudioReader (std::move (input)), loopRange (toSamples (loopRangeToUse, source->getSampleRate()))
+    LoopReader (std::unique_ptr<AudioReader> input, TimeRange loopRangeToUse, Mode m = Mode::wrap)
+        : SingleInputAudioReader (std::move (input)),
+          loopRange (toSamples (loopRangeToUse, source->getSampleRate())),
+          mode (m),
+          gatedPosition (loopRange.getStart())
     {
     }
 
@@ -176,20 +198,27 @@ public:
         const auto loopStart = loopRange.getStart();
         const auto loopLength = loopRange.getLength();
 
+        // Map an unbounded source-absolute position into [loopStart, loopStart + loopLength).
+        // The previous formula (`loopStart + (t % loopLength)`) only matched this contract when
+        // loopStart was a multiple of loopLength — for loops that don't begin at the file start
+        // (e.g. a clip that loops [10s, 11s]) it shifted incoming positions by loopStart's
+        // remainder. Subtracting loopStart before the modulo restores the invariant for any
+        // loop range.
         if (loopLength > 0)
-        {
-            if (t >= 0)
-                t = loopStart + (t % loopLength);
-            else
-                t = loopStart + juce::negativeAwareModulo (t, loopLength);
-        }
+            t = loopStart + juce::negativeAwareModulo (t - loopStart, loopLength);
 
+        gatedPosition = t;
         source->setPosition (t);
     }
 
     void setPosition (TimePosition t) override
     {
         setPosition (toSamples (t, getSampleRate()));
+    }
+
+    SampleCount getPosition() override
+    {
+        return mode == Mode::gate ? gatedPosition : source->getPosition();
     }
 
     bool readSamples (choc::buffer::ChannelArrayView<float>& destBuffer) override
@@ -203,6 +232,9 @@ public:
             return source->readSamples (destBuffer);
 
         const auto numFrames = static_cast<SampleCount> (destBuffer.getNumFrames());
+
+        if (mode == Mode::gate)
+            return readGated (destBuffer, numFrames, loopStart, loopLength);
 
         auto readPos = source->getPosition();
 
@@ -236,6 +268,45 @@ public:
     }
 
     const SampleRange loopRange;
+    const Mode mode;
+
+private:
+    bool readGated (choc::buffer::ChannelArrayView<float>& destBuffer,
+                    SampleCount numFrames, SampleCount loopStart, SampleCount loopLength)
+    {
+        using choc::buffer::FrameCount;
+
+        const auto loopEnd = loopStart + loopLength;
+
+        if (gatedPosition >= loopEnd || gatedPosition < loopStart)
+        {
+            destBuffer.clear();
+            gatedPosition += numFrames;
+            return true;
+        }
+
+        const auto numReal = std::min (numFrames, loopEnd - gatedPosition);
+
+        bool ok = true;
+
+        if (numReal > 0)
+        {
+            source->setPosition (gatedPosition);
+            auto realDest = destBuffer.getStart ((FrameCount) numReal);
+            ok = source->readSamples (realDest);
+        }
+
+        if (numReal < numFrames)
+        {
+            auto silence = destBuffer.getFrameRange ({ (FrameCount) numReal, (FrameCount) numFrames });
+            silence.clear();
+        }
+
+        gatedPosition += numFrames;
+        return ok;
+    }
+
+    SampleCount gatedPosition;
 };
 
 
@@ -2106,18 +2177,45 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
                                                                         destChannels, channelsToUse);
     std::unique_ptr<AudioReader> loopReader;
 
+    // In autoTempo (syncTempo / syncPitch) the upstream BeatRangeReader splits reads at the loop boundary and
+    // calls setPosition into each cycle, so the looping reader can gate past loopEnd to silence — this prevents
+    // the time-stretcher's FFT analysis window from pulling wrapped samples (which sound like an audible bleed
+    // of the post-loop transient — TE #8). Time-based playback does not split, so it still needs wrap.
+    const bool isAutoTempo = (syncTempo == SyncTempo::yes || syncPitch == SyncPitch::yes);
+    const auto loopMode = isAutoTempo ? LoopReader::Mode::gate : LoopReader::Mode::wrap;
+
+    // For autoTempo, the loop range lives in loopSectionBeats — convert to a file-time range
+    // via the file tempo so the LoopReader (which works in source samples) knows loopEnd.
+    const auto loopRangeForReader = [&]() -> TimeRange
+    {
+        if (isAutoTempo && ! loopSectionBeats.isEmpty() && fileTempoPosition != nullptr)
+        {
+            fileTempoPosition->set (loopSectionBeats.getStart());
+            const auto startTime = fileTempoPosition->getTime();
+            fileTempoPosition->set (loopSectionBeats.getEnd());
+            const auto endTime = fileTempoPosition->getTime();
+            return { startTime, endTime };
+        }
+
+        return loopSectionTime;
+    }();
+
     if (warpMap)
     {
         // If we're using a warp map, the looping as to be applied above the warp so the loop times don't get warped
         // This can have performance hits though
         loopReader = std::make_unique<WarpReader> (std::move (audioFileCacheReader), std::move (*warpMap), timeStretcherMode, elastiqueProOptions);
 
-        if (! loopSectionTime.isEmpty())
-            loopReader = std::make_unique<LoopReader> (std::move (loopReader), loopSectionTime);
+        if (! loopRangeForReader.isEmpty())
+            loopReader = std::make_unique<LoopReader> (std::move (loopReader), loopRangeForReader, loopMode);
+    }
+    else if (loopMode == LoopReader::Mode::gate && ! loopRangeForReader.isEmpty())
+    {
+        loopReader = std::make_unique<LoopReader> (std::move (audioFileCacheReader), loopRangeForReader, loopMode);
     }
     else
     {
-        audioFileCacheReader->setLoopRange (loopSectionTime);
+        audioFileCacheReader->setLoopRange (loopRangeForReader);
         loopReader = std::move (audioFileCacheReader);
     }
 
