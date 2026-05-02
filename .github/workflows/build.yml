@@ -7,7 +7,6 @@ on:
       - master
       - "feat/**"
       - "fix/**"
-  pull_request:
   workflow_dispatch:
 
 # Cancel in-progress runs when a new commit is pushed to the same ref.
@@ -15,24 +14,25 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-jobs:
-  build:
-    name: ${{ matrix.os }} / ${{ matrix.config }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ ubuntu-latest, macos-latest ]
-        config: [ Release ]
+env:
+  CMAKE_BUILD_TYPE: Release
+  CMAKE_FLAGS: >-
+    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_CXX_STANDARD=20
+    -DCMAKE_CXX_STANDARD_REQUIRED=ON
+    -DCMAKE_CXX_EXTENSIONS=OFF
+    -DTE_BUILD_COMPILE_CHECK=ON
 
+jobs:
+  ubuntu:
+    name: ubuntu-latest / Release
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Install Linux build dependencies
-        if: runner.os == 'Linux'
+      - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -43,30 +43,51 @@ jobs:
             libxinerama-dev libxrandr-dev libxrender-dev \
             libgl1-mesa-dev
 
-      - name: Install macOS build dependencies
-        if: runner.os == 'macOS'
+      - name: Configure
+        run: cmake -S . -B build -G Ninja $CMAKE_FLAGS
+
+      - name: Build
+        run: cmake --build build --parallel
+
+  macos:
+    name: macos-latest / Release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
         run: brew install ninja
 
       - name: Configure
-        run: >
-          cmake -S . -B build
-          -G Ninja
-          -DCMAKE_BUILD_TYPE=${{ matrix.config }}
-          -DCMAKE_CXX_STANDARD=20
-          -DCMAKE_CXX_STANDARD_REQUIRED=ON
-          -DCMAKE_CXX_EXTENSIONS=OFF
-          -DTE_BUILD_COMPILE_CHECK=ON
+        run: cmake -S . -B build -G Ninja $CMAKE_FLAGS
 
       - name: Build
-        run: cmake --build build --config ${{ matrix.config }} --parallel
+        run: cmake --build build --parallel
 
-      - name: Upload build log on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
+  windows:
+    name: windows-latest-8core / Release
+    runs-on: windows-latest-8core
+    steps:
+      - uses: actions/checkout@v4
         with:
-          name: build-log-${{ matrix.os }}-${{ matrix.config }}
-          path: |
-            build/CMakeFiles/CMakeOutput.log
-            build/CMakeFiles/CMakeError.log
-            build/.ninja_log
-          if-no-files-found: ignore
+          submodules: recursive
+
+      - name: Setup MSVC x64
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_CXX_STANDARD=20 `
+            -DCMAKE_CXX_STANDARD_REQUIRED=ON `
+            -DCMAKE_CXX_EXTENSIONS=OFF `
+            -DTE_BUILD_COMPILE_CHECK=ON
+
+      - name: Build
+        run: cmake --build build --parallel
