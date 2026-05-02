@@ -26,7 +26,8 @@ public:
                      std::optional<BeatDuration> stopDuration,
                      std::function<void (MonotonicBeat)> stopFunction,
                      EditItemID slotID,
-                     std::unique_ptr<Node> input);
+                     std::unique_ptr<Node> input,
+                     int launchFadeSamples = 256);
 
     const LaunchHandle& getLaunchHandle() const;
     const LaunchHandle* getLaunchHandleIfNotUnique() const;
@@ -45,6 +46,7 @@ private:
     std::shared_ptr<LaunchHandle> launchHandle;
     std::optional<BeatDuration> stopDuration;
     std::function<void (MonotonicBeat)> stopFunction;
+    int launchFadeSamples = 256;
     bool wasPlaying = false;
 
     const EditItemID slotID;
