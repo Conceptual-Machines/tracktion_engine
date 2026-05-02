@@ -215,6 +215,7 @@ AudioClipBase::AudioClipBase (const juce::ValueTree& v, EditItemID id, Type t, C
 
     fadeIn.referTo (state, IDs::fadeIn, um);
     fadeOut.referTo (state, IDs::fadeOut, um);
+    launchFadeSamples.referTo (state, IDs::launchFadeSamples, um, 256);
 
     fadeInType.referTo (state, IDs::fadeInType, um, AudioFadeCurve::linear);
     fadeOutType.referTo (state, IDs::fadeOutType, um, AudioFadeCurve::linear);
@@ -318,6 +319,7 @@ void AudioClipBase::cloneFrom (Clip* c)
         channels            .setValue (other->channels, nullptr);
         fadeIn              .setValue (other->fadeIn, nullptr);
         fadeOut             .setValue (other->fadeOut, nullptr);
+        launchFadeSamples   .setValue (other->launchFadeSamples, nullptr);
         fadeInType          .setValue (other->fadeInType, nullptr);
         fadeOutType         .setValue (other->fadeOutType, nullptr);
         autoCrossfade       .setValue (other->autoCrossfade, nullptr);
@@ -536,6 +538,12 @@ bool AudioClipBase::setFadeOut (TimeDuration out)
 
     return false;
 }
+
+void AudioClipBase::setLaunchFadeSamples (int samples)
+{
+    launchFadeSamples = juce::jlimit (0, 16384, samples);
+}
+
 
 TimeDuration AudioClipBase::getFadeIn() const
 {
@@ -2342,6 +2350,7 @@ void AudioClipBase::valueTreePropertyChanged (juce::ValueTree& tree, const juce:
         if (id == IDs::fadeInType || id == IDs::fadeOutType
             || id == IDs::fadeInBehaviour || id == IDs::fadeOutBehaviour
             || id == IDs::fadeIn || id == IDs::fadeOut
+            || id == IDs::launchFadeSamples
             || id == IDs::loopStart || id == IDs::loopLength
             || id == IDs::loopStartBeats || id == IDs::loopLengthBeats
             || id == IDs::transpose || id == IDs::pitchChange

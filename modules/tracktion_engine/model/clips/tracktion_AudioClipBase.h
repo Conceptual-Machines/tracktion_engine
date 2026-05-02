@@ -179,6 +179,18 @@ public:
     /** Returns the fade out duration in seconds. */
     TimeDuration getFadeOut() const;
 
+    /** Sets the launch fade length in samples — applied by SlotControlNode on the
+        stopped→playing transition to mask the discontinuity from silence to audio.
+        Default is 256 samples (≈ 5.8ms at 44.1kHz), preserving prior behaviour.
+        0 disables the fade entirely (useful when the leading transient must be
+        preserved). Larger values soften the launch attack further.
+        Only applies on the launcher (session-view) playback path.
+    */
+    void setLaunchFadeSamples (int samples);
+    /** Returns the launch fade length in samples. */
+    int getLaunchFadeSamples() const noexcept                   { return launchFadeSamples; }
+
+
     /** Sets the curve shape for the fade in to use. */
     void setFadeInType (AudioFadeCurve::Type);
     /** Returns the curve shape for the fade in to use. */
@@ -628,6 +640,7 @@ protected:
 
     juce::CachedValue<TimeDuration> fadeIn, fadeOut;
     TimeDuration autoFadeIn, autoFadeOut;
+    juce::CachedValue<int> launchFadeSamples;
     juce::CachedValue<AudioFadeCurve::Type> fadeInType, fadeOutType;
     juce::CachedValue<bool> autoCrossfade;
     juce::CachedValue<FadeBehaviour> fadeInBehaviour, fadeOutBehaviour;

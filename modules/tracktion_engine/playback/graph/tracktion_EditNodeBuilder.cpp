@@ -1028,9 +1028,13 @@ std::vector<std::unique_ptr<SlotControlNode>> createNodeForLauncherClips (const 
             if (auto clipNode = createNodeForClip (*clip, trackMuteState, params, ClipRole::launcher))
             {
                 std::shared_ptr<LaunchHandle> launchHandle;
+                int launchFadeSamples = 256;
 
                 if (auto acb = dynamic_cast<AudioClipBase*> (clip))
+                {
                     launchHandle = acb->getLaunchHandle();
+                    launchFadeSamples = acb->getLaunchFadeSamples();
+                }
                 else if (auto mc = dynamic_cast<MidiClip*> (clip))
                     launchHandle = mc->getLaunchHandle();
                 else if (auto sc = dynamic_cast<StepClip*> (clip))
@@ -1066,7 +1070,8 @@ std::vector<std::unique_ptr<SlotControlNode>> createNodeForLauncherClips (const 
                                                                       clipDuration,
                                                                       createFollowAction (*clip),
                                                                       slot->itemID,
-                                                                      std::move (clipNode));
+                                                                      std::move (clipNode),
+                                                                      launchFadeSamples);
 
                 nodes.push_back (std::move (controlNode));
             }
