@@ -14,8 +14,14 @@
 // - Only works with WaveAudioClips which have setUsesProxy (false) on them
 #define USE_DYNAMIC_OFFSET_CONTAINER_CLIP 1
 
-// MAGDA: Per-device peak metering — include before TE namespace
-#include "DeviceMeteringManager.hpp"
+// MAGDA: Per-device peak metering — include before TE namespace.
+// Gated on __has_include so this fork still builds standalone (e.g. CI in
+// the TE repo) where the MAGDA header isn't on the include path. The
+// guard `MAGDA_HAS_DEVICE_METERING` is propagated to the use sites below.
+#if __has_include("DeviceMeteringManager.hpp")
+ #include "DeviceMeteringManager.hpp"
+ #define MAGDA_HAS_DEVICE_METERING 1
+#endif
 
 namespace tracktion { inline namespace engine
 {
@@ -1308,6 +1314,7 @@ std::unique_ptr<tracktion::graph::Node> createNodeForPlugin (Plugin& plugin, con
                                                    params.forRendering, params.includeBypassedPlugins,
                                                    maxNumChannels);
 
+   #if MAGDA_HAS_DEVICE_METERING
     // MAGDA: Per-device gain + metering
     if (auto* mgr = magda::DeviceMeteringManager::getInstanceForEdit (plugin.edit))
     {
@@ -1323,6 +1330,7 @@ std::unique_ptr<tracktion::graph::Node> createNodeForPlugin (Plugin& plugin, con
             node = makeNode<LevelMeasuringNode> (std::move (node), measurer);
         }
     }
+   #endif
 
     return node;
 }
@@ -1394,6 +1402,7 @@ std::unique_ptr<tracktion::graph::Node> createPluginNodeForList (PluginList& lis
             node = createNodeForRackInstance (*rackInstance, std::move (node), params.processState,
                                               SampleRateAndBlockSize { params.sampleRate, params.blockSize });
 
+           #if MAGDA_HAS_DEVICE_METERING
             // MAGDA: Per-device gain + metering for instrument racks
             if (auto* mgr = magda::DeviceMeteringManager::getInstanceForEdit (list.getEdit()))
             {
@@ -1408,6 +1417,7 @@ std::unique_ptr<tracktion::graph::Node> createPluginNodeForList (PluginList& lis
                     node = makeNode<LevelMeasuringNode> (std::move (node), measurer);
                 }
             }
+           #endif
         }
         else if (auto insertPlugin = dynamic_cast<InsertPlugin*> (p))
         {
