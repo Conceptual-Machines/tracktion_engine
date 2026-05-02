@@ -353,6 +353,7 @@ namespace IDs
     DECLARE_ID (loopStartBeats)
     DECLARE_ID (loopLengthBeats)
     DECLARE_ID (loopCrossfade)
+    DECLARE_ID (launchFadeSamples)
     DECLARE_ID (channels)
     DECLARE_ID (elastiqueMode)
     DECLARE_ID (elastiqueOptions)

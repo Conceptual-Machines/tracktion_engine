@@ -216,6 +216,7 @@ AudioClipBase::AudioClipBase (const juce::ValueTree& v, EditItemID id, Type t, C
     fadeIn.referTo (state, IDs::fadeIn, um);
     fadeOut.referTo (state, IDs::fadeOut, um);
     loopCrossfade.referTo (state, IDs::loopCrossfade, um);
+    launchFadeSamples.referTo (state, IDs::launchFadeSamples, um, 256);
 
     fadeInType.referTo (state, IDs::fadeInType, um, AudioFadeCurve::linear);
     fadeOutType.referTo (state, IDs::fadeOutType, um, AudioFadeCurve::linear);
@@ -320,6 +321,7 @@ void AudioClipBase::cloneFrom (Clip* c)
         fadeIn              .setValue (other->fadeIn, nullptr);
         fadeOut             .setValue (other->fadeOut, nullptr);
         loopCrossfade       .setValue (other->loopCrossfade, nullptr);
+        launchFadeSamples   .setValue (other->launchFadeSamples, nullptr);
         fadeInType          .setValue (other->fadeInType, nullptr);
         fadeOutType         .setValue (other->fadeOutType, nullptr);
         autoCrossfade       .setValue (other->autoCrossfade, nullptr);
@@ -549,6 +551,15 @@ void AudioClipBase::setLoopCrossfade (TimeDuration length)
     auto cap = TimeDuration::fromSeconds (loopLen.inSeconds() * 0.5);
     length = juce::jlimit (TimeDuration(), cap, length);
     loopCrossfade = length;
+}
+
+void AudioClipBase::setLaunchFadeSamples (int samples)
+{
+    // Clamp to a sane range. 0 disables the fade entirely (transient
+    // preservation). The upper bound is generous — past a few thousand samples
+    // the launch is no longer a "fade" but a slow crossfade, which the user can
+    // express via the existing fadeIn instead.
+    launchFadeSamples = juce::jlimit (0, 16384, samples);
 }
 
 TimeDuration AudioClipBase::getFadeIn() const
@@ -2357,6 +2368,7 @@ void AudioClipBase::valueTreePropertyChanged (juce::ValueTree& tree, const juce:
             || id == IDs::fadeInBehaviour || id == IDs::fadeOutBehaviour
             || id == IDs::fadeIn || id == IDs::fadeOut
             || id == IDs::loopCrossfade
+            || id == IDs::launchFadeSamples
             || id == IDs::loopStart || id == IDs::loopLength
             || id == IDs::loopStartBeats || id == IDs::loopLengthBeats
             || id == IDs::transpose || id == IDs::pitchChange

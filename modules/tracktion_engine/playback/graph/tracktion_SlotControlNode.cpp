@@ -18,11 +18,13 @@ SlotControlNode::SlotControlNode (ProcessState& ps,
                                   std::optional<BeatDuration> stopDuration_,
                                   std::function<void (MonotonicBeat)> stopFunction_,
                                   EditItemID slotID_,
-                                  std::unique_ptr<Node> input_)
+                                  std::unique_ptr<Node> input_,
+                                  int launchFadeSamples_)
     : TracktionEngineNode (ps),
       launchHandle (std::move (launchHandle_)),
       stopDuration (stopDuration_),
       stopFunction (std::move (stopFunction_)),
+      launchFadeSamples (juce::jmax (0, launchFadeSamples_)),
       slotID (slotID_),
       input (std::move (input_)),
       localPlayheadState (ps.playHeadState.playHead),
@@ -311,13 +313,13 @@ void SlotControlNode::processSection (ProcessContext& pc, BeatRange editBeatRang
 
     // Apply a fade-in when transitioning from stopped to playing.
     // This prevents a click caused by the first audio sample being non-zero.
-    // 256 samples ≈ 5.8ms at 44.1kHz — short enough to be inaudible
-    // but long enough to eliminate the discontinuity from silence to audio.
-    if (! wasPlaying)
+    // Length is per-clip via AudioClipBase::launchFadeSamples (default 256
+    // samples ≈ 5.8ms @ 44.1kHz). 0 disables the fade (transient preservation).
+    if (! wasPlaying && launchFadeSamples > 0)
     {
         const auto numChannels = pc.buffers.audio.size.numChannels;
         const auto numFrames = pc.buffers.audio.size.numFrames;
-        const uint32_t fadeLength = std::min (numFrames, (uint32_t) 256);
+        const uint32_t fadeLength = std::min (numFrames, (uint32_t) launchFadeSamples);
 
         for (choc::buffer::ChannelCount channel = 0; channel < numChannels; ++channel)
         {
