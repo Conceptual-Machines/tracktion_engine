@@ -198,13 +198,14 @@ public:
         const auto loopStart = loopRange.getStart();
         const auto loopLength = loopRange.getLength();
 
+        // Map an unbounded source-absolute position into [loopStart, loopStart + loopLength).
+        // The previous formula (`loopStart + (t % loopLength)`) only matched this contract when
+        // loopStart was a multiple of loopLength — for loops that don't begin at the file start
+        // (e.g. a clip that loops [10s, 11s]) it shifted incoming positions by loopStart's
+        // remainder. Subtracting loopStart before the modulo restores the invariant for any
+        // loop range.
         if (loopLength > 0)
-        {
-            if (t >= 0)
-                t = loopStart + (t % loopLength);
-            else
-                t = loopStart + juce::negativeAwareModulo (t, loopLength);
-        }
+            t = loopStart + juce::negativeAwareModulo (t - loopStart, loopLength);
 
         gatedPosition = t;
         source->setPosition (t);
