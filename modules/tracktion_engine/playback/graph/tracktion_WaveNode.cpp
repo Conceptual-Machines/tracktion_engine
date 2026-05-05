@@ -1348,7 +1348,20 @@ private:
 
     static inline BeatPosition linearPositionToLoopPosition (BeatPosition position, BeatRange loopRange)
     {
-        return loopRange.getStart() + BeatDuration::fromBeats (std::fmod (position.inBeats(), loopRange.getLength().inBeats()));
+        // Wrap `position` into the loop region. The previous implementation
+        // computed `loopStart + fmod(position, loopLength)`, which only gives
+        // the correct phase when `loopStart == 0`. For a copied clip whose
+        // loop region starts at a non-zero source beat (e.g. the right side
+        // of a split, or a time-range copy that began mid-loop), this folded
+        // the read position to the wrong source beat — outside the loop —
+        // and the WaveNode rendered silence past the loop boundary.
+        const auto loopLength = loopRange.getLength().inBeats();
+        auto phase = std::fmod ((position - loopRange.getStart()).inBeats(), loopLength);
+
+        if (phase < 0.0)
+            phase += loopLength;
+
+        return loopRange.getStart() + BeatDuration::fromBeats (phase);
     }
 };
 
