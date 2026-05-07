@@ -67,8 +67,8 @@ jobs:
         run: cmake --build build --parallel
 
   windows:
-    name: windows-latest-8core / Release
-    runs-on: windows-latest-8core
+    name: windows-latest / Release
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with:

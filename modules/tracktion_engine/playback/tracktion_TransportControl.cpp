@@ -1101,11 +1101,18 @@ void TransportControl::timerCallback()
     {
         loopUpdateCounter = 10;
 
-        if (looping)
+        // MAGDA patch: honour the play-session decision performPlay/performRecord made.
+        // If the play range was extended past the loop end (i.e. transportState->endTime
+        // is beyond loopRange.getEnd()), the session is non-looping even though
+        // transport.looping is still on. Re-asserting setLoopTimes(true, lr) here would
+        // otherwise immediately wrap a cursor that's at/past loopEnd.
+        const auto lr = getLoopRange();
+        const bool sessionIsLooping = looping && transportState->endTime.get() <= lr.getEnd();
+
+        if (sessionIsLooping)
         {
-            auto lr = getLoopRange();
-            lr = lr.withEnd (std::max (lr.getEnd(), lr.getStart() + 0.001s));
-            playHeadWrapper->setLoopTimes (true, lr);
+            auto adjusted = lr.withEnd (std::max (lr.getEnd(), lr.getStart() + 0.001s));
+            playHeadWrapper->setLoopTimes (true, adjusted);
         }
         else
         {
@@ -1350,24 +1357,44 @@ void TransportControl::performPlay()
         if (transportState->justSendMMCIfEnabled && sendMMCStartPlay())
             return;
 
+        // MAGDA patch: cursor-aware play-start that respects the playhead instead of
+        // unconditionally snapping into the loop range. Comparisons are in beats (the
+        // canonical musical domain) so the boundary check is exact regardless of how
+        // cursor and loop bounds were derived from beats via the tempo sequence.
+        // Action map:
+        //   - cursor before loopStart   -> play from cursor, enter loop via PlayHead roll-in
+        //   - cursor inside loop        -> play from cursor, normal looping
+        //   - cursor at or past loopEnd -> play forward, no looping this session
+        bool cursorBeforeLoop = false;
+        bool cursorPastLoop = false;
+
         if (looping)
         {
-            const auto cursorPos = position.get();
             const auto loopRange = getLoopRange();
 
-            if (cursorPos < loopRange.getStart()
-                || cursorPos > loopRange.getEnd() - 0.1s)
-            {
-                position = loopRange.getStart();
-            }
-
-            transportState->startTime = loopRange.getStart();
-            transportState->endTime   = loopRange.getEnd();
-
-            if (transportState->endTime < transportState->startTime + 0.01s)
+            if (loopRange.getLength() < 0.01s)
             {
                 engine.getUIBehaviour().showWarningMessage (TRANS("Can't play in loop mode unless the in/out markers are further apart"));
                 return;
+            }
+
+            const auto& ts = edit.tempoSequence;
+            const auto cursorBeats    = ts.toBeats (position.get());
+            const auto loopStartBeats = ts.toBeats (loopRange.getStart());
+            const auto loopEndBeats   = ts.toBeats (loopRange.getEnd());
+
+            cursorBeforeLoop = cursorBeats < loopStartBeats;
+            cursorPastLoop   = cursorBeats >= loopEndBeats;
+
+            if (cursorPastLoop)
+            {
+                transportState->startTime = position.get();
+                transportState->endTime   = Edit::getMaximumEditEnd();
+            }
+            else
+            {
+                transportState->startTime = loopRange.getStart();
+                transportState->endTime   = loopRange.getEnd();
             }
         }
         else
@@ -1395,7 +1422,20 @@ void TransportControl::performPlay()
 
         if (playbackContext)
         {
-            playHeadWrapper->play ({ transportState->startTime, transportState->endTime }, looping);
+            // MAGDA patch: looping is suppressed for this play session if the cursor sits at
+            // or past the loop end. The transport.looping flag itself is unchanged — looping
+            // re-engages on the next play once the cursor is back inside or before the loop.
+            // The periodic loop-times update further down honours this by checking
+            // transportState->endTime against the loop range.
+            const bool effectivelyLooping = looping && ! cursorPastLoop;
+
+            playHeadWrapper->play ({ transportState->startTime, transportState->endTime }, effectivelyLooping);
+
+            if (cursorBeforeLoop)
+            {
+                // Engage PlayHead roll-in: play forward from cursor, enter loop naturally at loopStart.
+                playHeadWrapper->setRollInToLoop (position.get());
+            }
 
             // Post the position change to be dispatched otherwise what we're effectively doing is setting
             // the position for "this" block and it will get incremented the next block, actually starting
@@ -1452,6 +1492,19 @@ std::optional<std::pair<SyncPoint, std::optional<TimeRange>>> TransportControl::
                 transportState->startTime   = position.get();
                 transportState->endTime     = Edit::getMaximumEditEnd();
 
+                // MAGDA patch: mirror performPlay's cursor-vs-loop policy in beats so the
+                // boundary check is exact regardless of seconds-domain FP drift. Cursor at
+                // or past loopEnd -> record forward, no looping this session.
+                bool cursorPastLoop = false;
+                if (looping)
+                {
+                    const auto& ts = edit.tempoSequence;
+                    const auto cursorBeats  = ts.toBeats (transportState->startTime.get());
+                    const auto loopEndBeats = ts.toBeats (loopRange.getEnd());
+                    cursorPastLoop = cursorBeats >= loopEndBeats;
+                }
+                const bool effectivelyLooping = looping && ! cursorPastLoop;
+
                 if (looping)
                 {
                     if (loopRange.getLength() < 2s)
@@ -1466,7 +1519,15 @@ std::optional<std::pair<SyncPoint, std::optional<TimeRange>>> TransportControl::
                         return std::nullopt;
                     }
 
-                    transportState->startTime = loopRange.getStart();
+                    // MAGDA patch: do not snap the cursor to loop start when starting recording.
+                    // startTime stays at the cursor position set above (line ~1477). Pre-roll /
+                    // count-in continues to back up from cursor, and the existing setRollInToLoop
+                    // call further down handles the cursor-before-loop case naturally.
+                    if (cursorPastLoop)
+                    {
+                        // Cursor is past the loop end — record forward without looping this session.
+                        // transportState->endTime already equals Edit::getMaximumEditEnd() from above.
+                    }
                 }
                 else if (edit.recordingPunchInOut)
                 {
@@ -1514,7 +1575,7 @@ std::optional<std::pair<SyncPoint, std::optional<TimeRange>>> TransportControl::
                     if (edit.getNumCountInBeats() > 0)
                         playHeadWrapper->setLoopTimes (true, { transportState->startTime.get(), Edit::getMaximumEditEnd() });
 
-                    if (looping)
+                    if (effectivelyLooping)
                     {
                         // The order of this is critical as the audio thread might jump in and reset the
                         // roll-in-to-loop status of the loop-range is not set first
