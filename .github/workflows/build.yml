@@ -66,29 +66,28 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
-  # windows-latest-8core runner not available on this fork — disabled.
-  # windows:
-  #   name: windows-latest-8core / Release
-  #   runs-on: windows-latest-8core
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #       with:
-  #         submodules: recursive
-  #
-  #     - name: Setup MSVC x64
-  #       uses: ilammy/msvc-dev-cmd@v1
-  #       with:
-  #         arch: x64
-  #
-  #     - name: Configure
-  #       shell: pwsh
-  #       run: |
-  #         cmake -S . -B build -G Ninja `
-  #           -DCMAKE_BUILD_TYPE=Release `
-  #           -DCMAKE_CXX_STANDARD=20 `
-  #           -DCMAKE_CXX_STANDARD_REQUIRED=ON `
-  #           -DCMAKE_CXX_EXTENSIONS=OFF `
-  #           -DTE_BUILD_COMPILE_CHECK=ON
-  #
-  #     - name: Build
-  #       run: cmake --build build --parallel
+  windows:
+    name: windows-latest / Release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup MSVC x64
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_CXX_STANDARD=20 `
+            -DCMAKE_CXX_STANDARD_REQUIRED=ON `
+            -DCMAKE_CXX_EXTENSIONS=OFF `
+            -DTE_BUILD_COMPILE_CHECK=ON
+
+      - name: Build
+        run: cmake --build build --parallel
