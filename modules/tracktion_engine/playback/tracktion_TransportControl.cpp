@@ -1477,6 +1477,14 @@ std::optional<std::pair<SyncPoint, std::optional<TimeRange>>> TransportControl::
                 transportState->startTime   = position.get();
                 transportState->endTime     = Edit::getMaximumEditEnd();
 
+                // MAGDA patch: mirror performPlay's cursor-vs-loop policy. If the cursor sits
+                // past the loop end at record start, treat this session as non-looping so the
+                // playhead doesn't snap-clamp back to the loop region. Looping re-engages on
+                // the next start whenever the cursor is back in or before the region.
+                const bool cursorPastLoop = looping
+                                          && transportState->startTime.get() > loopRange.getEnd() - 0.1s;
+                const bool effectivelyLooping = looping && ! cursorPastLoop;
+
                 if (looping)
                 {
                     if (loopRange.getLength() < 2s)
@@ -1495,6 +1503,11 @@ std::optional<std::pair<SyncPoint, std::optional<TimeRange>>> TransportControl::
                     // startTime stays at the cursor position set above (line ~1477). Pre-roll /
                     // count-in continues to back up from cursor, and the existing setRollInToLoop
                     // call further down handles the cursor-before-loop case naturally.
+                    if (cursorPastLoop)
+                    {
+                        // Cursor is past the loop end — record forward without looping this session.
+                        // transportState->endTime already equals Edit::getMaximumEditEnd() from above.
+                    }
                 }
                 else if (edit.recordingPunchInOut)
                 {
@@ -1542,7 +1555,7 @@ std::optional<std::pair<SyncPoint, std::optional<TimeRange>>> TransportControl::
                     if (edit.getNumCountInBeats() > 0)
                         playHeadWrapper->setLoopTimes (true, { transportState->startTime.get(), Edit::getMaximumEditEnd() });
 
-                    if (looping)
+                    if (effectivelyLooping)
                     {
                         // The order of this is critical as the audio thread might jump in and reset the
                         // roll-in-to-loop status of the loop-range is not set first
