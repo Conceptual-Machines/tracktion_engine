@@ -1350,11 +1350,12 @@ void TransportControl::performPlay()
         if (transportState->justSendMMCIfEnabled && sendMMCStartPlay())
             return;
 
-        // MAGDA patch: do not snap the cursor to loop start when starting playback.
-        // Behavior matches Live/Bitwig/Logic/Cubase/Reaper:
-        //   - cursor before loop  -> play from cursor, enter loop naturally at loopStart (PlayHead roll-in)
-        //   - cursor inside loop  -> normal looping
-        //   - cursor after loop   -> play forward, no looping this session (user can seek back to engage)
+        // MAGDA patch: cursor-aware play-start that respects the playhead instead of unconditionally
+        // snapping into the loop range. Action map:
+        //   - cursor before loopStart           -> play from cursor, enter loop via PlayHead roll-in
+        //   - cursor inside loop, far from end  -> play from cursor, normal looping
+        //   - cursor in last 0.1s of loop       -> snap to loopStart (TE original; harmless one-time)
+        //   - cursor strictly past loopEnd      -> play forward, no looping this session
         if (looping)
         {
             const auto cursorPos = position.get();
@@ -1366,16 +1367,20 @@ void TransportControl::performPlay()
                 return;
             }
 
-            if (cursorPos > loopRange.getEnd() - 0.1s)
+            if (cursorPos > loopRange.getEnd())
             {
-                // Cursor past loop end: play forward without looping this session.
+                // Strictly past loop end: play forward without looping this session.
                 transportState->startTime = cursorPos;
                 transportState->endTime   = Edit::getMaximumEditEnd();
             }
             else
             {
-                // Cursor before or inside loop: play range = loop range.
-                // Roll-in for the before-loop case is engaged below after playHeadWrapper->play().
+                if (cursorPos > loopRange.getEnd() - 0.1s)
+                {
+                    // Within the last 100ms before loop end — snap to loopStart so we
+                    // don't land at a position that wraps on the very first sample.
+                    position = loopRange.getStart();
+                }
                 transportState->startTime = loopRange.getStart();
                 transportState->endTime   = loopRange.getEnd();
             }
@@ -1411,7 +1416,7 @@ void TransportControl::performPlay()
             const auto loopRange = getLoopRange();
             const auto cursorPos = position.get();
             const bool cursorBeforeLoop = looping && cursorPos < loopRange.getStart();
-            const bool cursorPastLoop   = looping && cursorPos > loopRange.getEnd() - 0.1s;
+            const bool cursorPastLoop   = looping && cursorPos > loopRange.getEnd();
             const bool effectivelyLooping = looping && ! cursorPastLoop;
 
             playHeadWrapper->play ({ transportState->startTime, transportState->endTime }, effectivelyLooping);
@@ -1482,7 +1487,7 @@ std::optional<std::pair<SyncPoint, std::optional<TimeRange>>> TransportControl::
                 // playhead doesn't snap-clamp back to the loop region. Looping re-engages on
                 // the next start whenever the cursor is back in or before the region.
                 const bool cursorPastLoop = looping
-                                          && transportState->startTime.get() > loopRange.getEnd() - 0.1s;
+                                          && transportState->startTime.get() > loopRange.getEnd();
                 const bool effectivelyLooping = looping && ! cursorPastLoop;
 
                 if (looping)
