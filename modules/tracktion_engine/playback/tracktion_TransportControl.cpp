@@ -1350,24 +1350,34 @@ void TransportControl::performPlay()
         if (transportState->justSendMMCIfEnabled && sendMMCStartPlay())
             return;
 
+        // MAGDA patch: do not snap the cursor to loop start when starting playback.
+        // Behavior matches Live/Bitwig/Logic/Cubase/Reaper:
+        //   - cursor before loop  -> play from cursor, enter loop naturally at loopStart (PlayHead roll-in)
+        //   - cursor inside loop  -> normal looping
+        //   - cursor after loop   -> play forward, no looping this session (user can seek back to engage)
         if (looping)
         {
             const auto cursorPos = position.get();
             const auto loopRange = getLoopRange();
 
-            if (cursorPos < loopRange.getStart()
-                || cursorPos > loopRange.getEnd() - 0.1s)
-            {
-                position = loopRange.getStart();
-            }
-
-            transportState->startTime = loopRange.getStart();
-            transportState->endTime   = loopRange.getEnd();
-
-            if (transportState->endTime < transportState->startTime + 0.01s)
+            if (loopRange.getLength() < 0.01s)
             {
                 engine.getUIBehaviour().showWarningMessage (TRANS("Can't play in loop mode unless the in/out markers are further apart"));
                 return;
+            }
+
+            if (cursorPos > loopRange.getEnd() - 0.1s)
+            {
+                // Cursor past loop end: play forward without looping this session.
+                transportState->startTime = cursorPos;
+                transportState->endTime   = Edit::getMaximumEditEnd();
+            }
+            else
+            {
+                // Cursor before or inside loop: play range = loop range.
+                // Roll-in for the before-loop case is engaged below after playHeadWrapper->play().
+                transportState->startTime = loopRange.getStart();
+                transportState->endTime   = loopRange.getEnd();
             }
         }
         else
@@ -1395,7 +1405,22 @@ void TransportControl::performPlay()
 
         if (playbackContext)
         {
-            playHeadWrapper->play ({ transportState->startTime, transportState->endTime }, looping);
+            // MAGDA patch: looping is suppressed for this play session if the cursor sits past the
+            // loop end. The transport.looping flag itself is unchanged — looping re-engages whenever
+            // the cursor is back inside or before the loop on the next play.
+            const auto loopRange = getLoopRange();
+            const auto cursorPos = position.get();
+            const bool cursorBeforeLoop = looping && cursorPos < loopRange.getStart();
+            const bool cursorPastLoop   = looping && cursorPos > loopRange.getEnd() - 0.1s;
+            const bool effectivelyLooping = looping && ! cursorPastLoop;
+
+            playHeadWrapper->play ({ transportState->startTime, transportState->endTime }, effectivelyLooping);
+
+            if (cursorBeforeLoop)
+            {
+                // Engage PlayHead roll-in: play forward from cursor, enter loop naturally at loopStart.
+                playHeadWrapper->setRollInToLoop (cursorPos);
+            }
 
             // Post the position change to be dispatched otherwise what we're effectively doing is setting
             // the position for "this" block and it will get incremented the next block, actually starting
@@ -1466,7 +1491,10 @@ std::optional<std::pair<SyncPoint, std::optional<TimeRange>>> TransportControl::
                         return std::nullopt;
                     }
 
-                    transportState->startTime = loopRange.getStart();
+                    // MAGDA patch: do not snap the cursor to loop start when starting recording.
+                    // startTime stays at the cursor position set above (line ~1477). Pre-roll /
+                    // count-in continues to back up from cursor, and the existing setRollInToLoop
+                    // call further down handles the cursor-before-loop case naturally.
                 }
                 else if (edit.recordingPunchInOut)
                 {
