@@ -256,12 +256,38 @@ void LFOModifier::applyToBuffer (const PluginRenderContext& prc)
     if (prc.bufferForMidiMessages == nullptr)
         return;
 
-    if (skipNativeResync_.load (std::memory_order_acquire))
+    const bool skipResync = skipNativeResync_.load (std::memory_order_acquire);
+    const bool gateByMidi = gateOnTriggerSource_.load (std::memory_order_acquire)
+                         && juce::roundToInt (syncTypeParam->getCurrentValue()) == ModifierCommon::note;
+
+    if (skipResync && ! gateByMidi)
         return;
 
     for (auto& m : *prc.bufferForMidiMessages)
+    {
         if (m.isNoteOn())
-            modifierTimer->resync (prc.bufferNumSamples / getSampleRate());
+        {
+            if (! skipResync)
+                modifierTimer->resync (prc.bufferNumSamples / getSampleRate());
+
+            if (gateByMidi)
+            {
+                ++heldNotes_;
+                gated_.store (false, std::memory_order_release);
+            }
+        }
+        else if (gateByMidi && m.isNoteOff (true))
+        {
+            heldNotes_ = juce::jmax (0, heldNotes_ - 1);
+            if (heldNotes_ == 0)
+                gated_.store (true, std::memory_order_release);
+        }
+        else if (gateByMidi && (m.isAllNotesOff() || m.isAllSoundOff()))
+        {
+            heldNotes_ = 0;
+            gated_.store (true, std::memory_order_release);
+        }
+    }
 }
 
 void LFOModifier::triggerNoteOn (bool forceZeroValue)
