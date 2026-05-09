@@ -105,6 +105,20 @@ public:
     void setSkipNativeResync (bool skip)  { skipNativeResync_.store (skip, std::memory_order_release); }
     bool getSkipNativeResync() const      { return skipNativeResync_.load (std::memory_order_acquire); }
 
+    /** When true and syncType == note, applyToBuffer() drives the gated_ flag
+        from the MIDI stream: NoteOn ungates and increments a held-note count,
+        NoteOff (or vel-0 NoteOn) decrements it; gate is re-asserted once the
+        count returns to zero. AllNotesOff / AllSoundOff force the count to
+        zero. Lets MIDI-trigger LFOs behave like envelopes — output sits at 0
+        between notes — without changing the free-run sync mode. */
+    void setGateOnTriggerSource (bool g)
+    {
+        gateOnTriggerSource_.store (g, std::memory_order_release);
+        if (! g)
+            gated_.store (false, std::memory_order_release);
+    }
+    bool getGateOnTriggerSource() const   { return gateOnTriggerSource_.load (std::memory_order_acquire); }
+
 private:
     struct LFOModifierTimer;
     std::unique_ptr<LFOModifierTimer> modifierTimer;
@@ -113,6 +127,8 @@ private:
     std::atomic<float> currentPhase { 0.0f }, currentValue { 0.0f };
     std::atomic<bool> gated_ { false };
     std::atomic<bool> skipNativeResync_ { false };
+    std::atomic<bool> gateOnTriggerSource_ { false };
+    int heldNotes_ = 0;  // audio-thread only; touched from applyToBuffer
 
     void valueTreeChanged() override;
 };
