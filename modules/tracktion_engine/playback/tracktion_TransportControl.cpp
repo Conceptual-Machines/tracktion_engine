@@ -252,6 +252,13 @@ struct TransportControl::TransportState : private juce::ValueTree::Listener
     juce::ValueTree state, transientState { IDs::TRANSPORT };
     TransportControl& transport;
 
+    // MAGDA patch: explicit "the playhead is in a looping session" flag.
+    // performPlay / performRecord set this at session start so callers don't
+    // have to reverse-engineer it from transportState->endTime (which is
+    // loopEnd for play-loop sessions but maxEditEnd for record-loop and
+    // cursor-past-loop play sessions — the proxy can't distinguish them).
+    bool sessionPlayheadIsLooping = false;
+
 private:
     bool isInsideRecordingCallback = false;
 
@@ -1101,16 +1108,16 @@ void TransportControl::timerCallback()
     {
         loopUpdateCounter = 10;
 
-        // MAGDA patch: honour the play-session decision performPlay/performRecord made.
-        // If the play range was extended past the loop end (i.e. transportState->endTime
-        // is beyond loopRange.getEnd()), the session is non-looping even though
-        // transport.looping is still on. Re-asserting setLoopTimes(true, lr) here would
-        // otherwise immediately wrap a cursor that's at/past loopEnd.
-        const auto lr = getLoopRange();
-        const bool sessionIsLooping = looping && transportState->endTime.get() <= lr.getEnd();
-
-        if (sessionIsLooping)
+        // MAGDA patch: honour the play-session decision performPlay/performRecord
+        // made via the sessionPlayheadIsLooping flag. Re-asserting
+        // setLoopTimes(true, lr) here would otherwise wrap a cursor in a
+        // cursor-past-loop play session or a non-looping record session.
+        // sessionPlayheadIsLooping covers both record and play loop cases
+        // (which transportState->endTime can't, since it's loopEnd for play
+        // loops but maxEditEnd for record loops).
+        if (transportState->sessionPlayheadIsLooping && looping)
         {
+            const auto lr = getLoopRange();
             auto adjusted = lr.withEnd (std::max (lr.getEnd(), lr.getStart() + 0.001s));
             playHeadWrapper->setLoopTimes (true, adjusted);
         }
@@ -1227,53 +1234,48 @@ void TransportControl::setLoopOut (TimePosition t)
     setLoopPoint2 (std::max (TimePosition(), t));
 }
 
-// MAGDA patch: keep transportState->endTime aligned with the loop end across
-// mid-playback loop-range edits.
-//
-// performPlay/performRecord set transportState->endTime to loopRange.getEnd()
-// when starting a session inside the loop (or to maxEditEnd when starting
-// past the loop). timerCallback then gates the periodic playhead
-// setLoopTimes re-assert on `looping && endTime <= loopEnd`. If the loop
-// range later shrinks below the captured endTime — most commonly because a
-// tempo change recomputes loop bounds in seconds with a faster BPM — the
-// session silently flips to non-looping and the playhead stops wrapping.
-// Following the loop end here restores the invariant so the looping session
-// survives loop-range mutations.
-#define MAGDA_SYNC_END_TIME_TO_LOOP_END(oldEnd)                            \
+// MAGDA patch: when the loop range changes mid-session and the playhead is
+// currently in a looping session (sessionPlayheadIsLooping was decided by
+// performPlay / performRecord), push the new range to the playhead
+// immediately. The timerCallback's periodic re-assert would pick this up
+// within ~100ms anyway, but the immediate write avoids audible looping at
+// stale bounds in the window between the loop edit and the next tick —
+// notably the BPM-change path where MAGDA recomputes loop seconds against
+// the new tempo and pushes them through setLoopRange.
+#define MAGDA_PUSH_LOOP_RANGE_IF_SESSION_LOOPING()                          \
     do {                                                                    \
-        if (isPlaying()) {                                                  \
-            const auto newEnd_ = getLoopRange().getEnd();                   \
-            if (oldEnd != newEnd_ && transportState->endTime.get() == oldEnd) \
-                transportState->endTime = newEnd_;                          \
+        if (transportState->sessionPlayheadIsLooping && isPlaying()         \
+            && playbackContext != nullptr)                                  \
+        {                                                                   \
+            auto lr_ = getLoopRange();                                      \
+            lr_ = lr_.withEnd (std::max (lr_.getEnd(), lr_.getStart() + 0.001s)); \
+            playHeadWrapper->setLoopTimes (true, lr_);                      \
         }                                                                   \
     } while (false)
 
 void TransportControl::setLoopPoint1 (TimePosition t)
 {
-    const auto oldLoopEnd = getLoopRange().getEnd();
     loopPoint1 = juce::jlimit (0_tp, toPosition (edit.getLength() + Edit::getMaximumLength() * 0.75), t);
-    MAGDA_SYNC_END_TIME_TO_LOOP_END (oldLoopEnd);
+    MAGDA_PUSH_LOOP_RANGE_IF_SESSION_LOOPING();
 }
 
 void TransportControl::setLoopPoint2 (TimePosition t)
 {
-    const auto oldLoopEnd = getLoopRange().getEnd();
     loopPoint2 = juce::jlimit (0_tp, toPosition (edit.getLength() + Edit::getMaximumLength() * 0.75), t);
-    MAGDA_SYNC_END_TIME_TO_LOOP_END (oldLoopEnd);
+    MAGDA_PUSH_LOOP_RANGE_IF_SESSION_LOOPING();
 }
 
 void TransportControl::setLoopRange (TimeRange times)
 {
     auto maxEndTime = toPosition (edit.getLength() + Edit::getMaximumLength() * 0.75);
-    const auto oldLoopEnd = getLoopRange().getEnd();
 
     loopPoint1 = juce::jlimit (0_tp, maxEndTime, times.getStart());
     loopPoint2 = juce::jlimit (0_tp, maxEndTime, times.getEnd());
 
-    MAGDA_SYNC_END_TIME_TO_LOOP_END (oldLoopEnd);
+    MAGDA_PUSH_LOOP_RANGE_IF_SESSION_LOOPING();
 }
 
-#undef MAGDA_SYNC_END_TIME_TO_LOOP_END
+#undef MAGDA_PUSH_LOOP_RANGE_IF_SESSION_LOOPING
 
 void TransportControl::setLoopRange (BeatRange beats)
 {
@@ -1446,11 +1448,14 @@ void TransportControl::performPlay()
                 transportState->startTime = loopRange.getStart();
                 transportState->endTime   = loopRange.getEnd();
             }
+
+            transportState->sessionPlayheadIsLooping = ! cursorPastLoop;
         }
         else
         {
             transportState->startTime = position.get();
             transportState->endTime   = Edit::getMaximumEditEnd();
+            transportState->sessionPlayheadIsLooping = false;
         }
 
         if (edit.getAbletonLink().isConnected())
@@ -1554,6 +1559,7 @@ std::optional<std::pair<SyncPoint, std::optional<TimeRange>>> TransportControl::
                     cursorPastLoop = cursorBeats >= loopEndBeats;
                 }
                 const bool effectivelyLooping = looping && ! cursorPastLoop;
+                transportState->sessionPlayheadIsLooping = effectivelyLooping;
 
                 if (looping)
                 {
@@ -1744,6 +1750,8 @@ void TransportControl::performStop()
     const juce::ScopedValueSetter<bool> svs (isStopInProgress, true);
     screenSaverDefeater.reset();
     sectionPlayer.reset();
+
+    transportState->sessionPlayheadIsLooping = false;
 
     engine.getUIBehaviour().hideSafeRecordDialog (*this);
 
