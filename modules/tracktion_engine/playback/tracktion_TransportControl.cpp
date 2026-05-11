@@ -1227,23 +1227,53 @@ void TransportControl::setLoopOut (TimePosition t)
     setLoopPoint2 (std::max (TimePosition(), t));
 }
 
+// MAGDA patch: keep transportState->endTime aligned with the loop end across
+// mid-playback loop-range edits.
+//
+// performPlay/performRecord set transportState->endTime to loopRange.getEnd()
+// when starting a session inside the loop (or to maxEditEnd when starting
+// past the loop). timerCallback then gates the periodic playhead
+// setLoopTimes re-assert on `looping && endTime <= loopEnd`. If the loop
+// range later shrinks below the captured endTime — most commonly because a
+// tempo change recomputes loop bounds in seconds with a faster BPM — the
+// session silently flips to non-looping and the playhead stops wrapping.
+// Following the loop end here restores the invariant so the looping session
+// survives loop-range mutations.
+#define MAGDA_SYNC_END_TIME_TO_LOOP_END(oldEnd)                            \
+    do {                                                                    \
+        if (isPlaying()) {                                                  \
+            const auto newEnd_ = getLoopRange().getEnd();                   \
+            if (oldEnd != newEnd_ && transportState->endTime.get() == oldEnd) \
+                transportState->endTime = newEnd_;                          \
+        }                                                                   \
+    } while (false)
+
 void TransportControl::setLoopPoint1 (TimePosition t)
 {
+    const auto oldLoopEnd = getLoopRange().getEnd();
     loopPoint1 = juce::jlimit (0_tp, toPosition (edit.getLength() + Edit::getMaximumLength() * 0.75), t);
+    MAGDA_SYNC_END_TIME_TO_LOOP_END (oldLoopEnd);
 }
 
 void TransportControl::setLoopPoint2 (TimePosition t)
 {
+    const auto oldLoopEnd = getLoopRange().getEnd();
     loopPoint2 = juce::jlimit (0_tp, toPosition (edit.getLength() + Edit::getMaximumLength() * 0.75), t);
+    MAGDA_SYNC_END_TIME_TO_LOOP_END (oldLoopEnd);
 }
 
 void TransportControl::setLoopRange (TimeRange times)
 {
     auto maxEndTime = toPosition (edit.getLength() + Edit::getMaximumLength() * 0.75);
+    const auto oldLoopEnd = getLoopRange().getEnd();
 
     loopPoint1 = juce::jlimit (0_tp, maxEndTime, times.getStart());
     loopPoint2 = juce::jlimit (0_tp, maxEndTime, times.getEnd());
+
+    MAGDA_SYNC_END_TIME_TO_LOOP_END (oldLoopEnd);
 }
+
+#undef MAGDA_SYNC_END_TIME_TO_LOOP_END
 
 void TransportControl::setLoopRange (BeatRange beats)
 {
