@@ -283,6 +283,40 @@ public:
     */
     void setOffset (TimeDuration newOffset);
 
+    /** Sets the start position of the clip in beats.
+        Converts to time using the Edit's TempoSequence, so the resulting
+        TimePosition tracks tempo curves correctly.
+        @param newStart     The start position in beats
+        @param preserveSync Whether the source material position should be kept static in relation to the Edit's timeline.
+        @param keepLength   Whether the end should be moved to keep the same length.
+    */
+    void setStart (BeatPosition newStart, bool preserveSync, bool keepLength);
+
+    /** Sets the length of the clip in beats.
+        The end is computed as (current start in beats) + newLength and converted
+        through the Edit's TempoSequence, so this is tempo-curve aware rather than
+        a flat-tempo seconds calculation.
+        @param newLength    The length in beats
+        @param preserveSync Whether the source material position should be kept static in relation to the Edit's timeline.
+    */
+    void setLength (BeatDuration newLength, bool preserveSync);
+
+    /** Sets the end position of the clip in beats.
+        Converts to time using the Edit's TempoSequence.
+        @param newEnd       The end position in beats
+        @param preserveSync Whether the source material position should be kept static in relation to the Edit's timeline.
+    */
+    void setEnd (BeatPosition newEnd, bool preserveSync);
+
+    /** Returns the start position of the clip in beats. */
+    BeatPosition getStartBeats() const;
+
+    /** Returns the end position of the clip in beats. */
+    BeatPosition getEndBeats() const;
+
+    /** Returns the length of the clip in beats. */
+    BeatDuration getLengthBeats() const;
+
     /** Trims away any part of the clip that overlaps this region. */
     void trimAwayOverlap (TimeRange editRangeToTrim);
 

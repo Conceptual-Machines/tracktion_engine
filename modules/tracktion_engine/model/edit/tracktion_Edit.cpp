@@ -3049,7 +3049,7 @@ std::unique_ptr<Edit> Edit::createEditForPreviewingPreset (Engine& engine, juce:
         if (auto firstClip = track->getClips().getFirst())
         {
             length = TimeDuration::fromSeconds (length.inSeconds() * clipTempo / songTempo);
-            firstClip->setStart ({}, false, true);
+            firstClip->setStart (TimePosition(), false, true);
             firstClip->setLength (length, true);
 
             edit->getTransport().setLoopRange ({ TimePosition(), length });
