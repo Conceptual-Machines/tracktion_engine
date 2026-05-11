@@ -161,6 +161,16 @@ public:
     /** Sets a new transport position to take effect at a given time. */
     void setPosition (TimePosition timeToMoveTo, TimePosition timeToPerformJump);
 
+    /** Sets a new transport position in beats.
+        Converts to time using the Edit's TempoSequence.
+    */
+    void setPosition (BeatPosition);
+
+    /** Returns the current transport position in beats.
+        Converts the current TimePosition using the Edit's TempoSequence.
+    */
+    BeatPosition getPositionBeats() const;
+
     /** Signifies a scrub-drag operation has started/stopped.
         While dragging, a short section of the play position is looped repeatedly.
     */
@@ -192,8 +202,19 @@ public:
     /** Sets the loop points from a given range. */
     void setLoopRange (TimeRange);
 
+    /** Sets the loop points from a given range in beats.
+        Converts to time using the Edit's TempoSequence so the loop range
+        tracks tempo changes when callers re-apply the same BeatRange.
+    */
+    void setLoopRange (BeatRange);
+
     /** Returns the loop range. The loop range is between the two loop points. */
     TimeRange getLoopRange() const noexcept;
+
+    /** Returns the loop range in beats.
+        Converts the current TimeRange using the Edit's TempoSequence.
+    */
+    BeatRange getLoopRangeBeats() const;
 
     /** Sets a snap type to use. */
     void setSnapType (TimecodeSnapType);

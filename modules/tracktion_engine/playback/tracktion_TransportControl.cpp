@@ -1170,6 +1170,16 @@ void TransportControl::setPosition (TimePosition timeToMoveTo, TimePosition time
     sendChangeMessage();
 }
 
+void TransportControl::setPosition (BeatPosition b)
+{
+    setPosition (edit.tempoSequence.toTime (b));
+}
+
+BeatPosition TransportControl::getPositionBeats() const
+{
+    return edit.tempoSequence.toBeats (getPosition());
+}
+
 void TransportControl::setUserDragging (bool b)
 {
     CRASH_TRACER
@@ -1235,9 +1245,19 @@ void TransportControl::setLoopRange (TimeRange times)
     loopPoint2 = juce::jlimit (0_tp, maxEndTime, times.getEnd());
 }
 
+void TransportControl::setLoopRange (BeatRange beats)
+{
+    setLoopRange (edit.tempoSequence.toTime (beats));
+}
+
 TimeRange TransportControl::getLoopRange() const noexcept
 {
     return TimeRange::between (loopPoint1, loopPoint2);
+}
+
+BeatRange TransportControl::getLoopRangeBeats() const
+{
+    return edit.tempoSequence.toBeats (getLoopRange());
 }
 
 void TransportControl::setSnapType (TimecodeSnapType newSnapType)
