@@ -413,6 +413,37 @@ void Clip::setOffset (TimeDuration newOffset)
     setPosition (pos);
 }
 
+void Clip::setStart (BeatPosition newStart, bool preserveSync, bool keepLength)
+{
+    setStart (edit.tempoSequence.toTime (newStart), preserveSync, keepLength);
+}
+
+void Clip::setLength (BeatDuration newLength, bool preserveSync)
+{
+    const auto startBeats = edit.tempoSequence.toBeats (getPosition().time.getStart());
+    setEnd (edit.tempoSequence.toTime (startBeats + newLength), preserveSync);
+}
+
+void Clip::setEnd (BeatPosition newEnd, bool preserveSync)
+{
+    setEnd (edit.tempoSequence.toTime (newEnd), preserveSync);
+}
+
+BeatPosition Clip::getStartBeats() const
+{
+    return edit.tempoSequence.toBeats (getPosition().time.getStart());
+}
+
+BeatPosition Clip::getEndBeats() const
+{
+    return edit.tempoSequence.toBeats (getPosition().time.getEnd());
+}
+
+BeatDuration Clip::getLengthBeats() const
+{
+    return getEndBeats() - getStartBeats();
+}
+
 juce::Array<TimePosition> Clip::getInterestingTimes()
 {
     juce::Array<TimePosition> times;
