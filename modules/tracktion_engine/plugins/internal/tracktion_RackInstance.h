@@ -35,7 +35,8 @@ public:
     bool takesMidiInput() override                      { return true; }
     bool producesAudioWhenNoAudioInput() override       { return true; }
     bool isSynth() override                             { return true; }
-    bool canBeAddedToRack() override                    { return false; }
+    // MAGDA builds distinct RackTypes for nested rack nodes.
+    bool canBeAddedToRack() override                    { return true; }
     int getNumOutputChannelsGivenInputs (int) override  { return 2; }
     double getLatencySeconds() override;
     bool needsConstantBufferSize() override             { return true; }
