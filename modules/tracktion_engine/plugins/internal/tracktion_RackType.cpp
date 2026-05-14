@@ -29,6 +29,32 @@ static juce::String getDefaultOutputName (int i)
     return TRANS("Output") + " " + juce::String (i + 1);
 }
 
+static bool rackTypeContainsRackType (const RackType& searchRoot, const RackType& target,
+                                      juce::Array<const RackType*>& visited)
+{
+    if (&searchRoot == &target)
+        return true;
+
+    if (visited.contains (&searchRoot))
+        return false;
+
+    visited.add (&searchRoot);
+
+    for (auto* plugin : searchRoot.getPlugins())
+        if (auto* rackInstance = dynamic_cast<RackInstance*> (plugin))
+            if (rackInstance->type != nullptr
+                && rackTypeContainsRackType (*rackInstance->type, target, visited))
+                return true;
+
+    return false;
+}
+
+static bool rackTypeContainsRackType (const RackType& searchRoot, const RackType& target)
+{
+    juce::Array<const RackType*> visited;
+    return rackTypeContainsRackType (searchRoot, target, visited);
+}
+
 //==============================================================================
 RackConnection::RackConnection (const juce::ValueTree& v, juce::UndoManager* um)
     : state (v)
@@ -496,6 +522,10 @@ bool RackType::addPlugin (const Plugin::Ptr& p, juce::Point<float> pos, bool can
 {
     if (! isPluginAllowed (p))
         return false;
+
+    if (auto* rackInstance = dynamic_cast<RackInstance*> (p.get()))
+        if (rackInstance->type == nullptr || rackTypeContainsRackType (*rackInstance->type, *this))
+            return false;
 
     if (! getPlugins().contains (p.get()))
     {
