@@ -274,6 +274,7 @@ private:
             else if (i == IDs::looping)
             {
                 transport.stopIfRecording();
+                transport.reevaluateActiveLoopSession();
 
                 auto& ecm = transport.engine.getExternalControllerManager();
 
@@ -666,10 +667,10 @@ struct TransportControl::PlayHeadWrapper
         return {};
     }
 
-    void setLoopTimes (bool loop, TimeRange newRange)
+    void setLoopTimes (bool loop, TimeRange newRange, bool updatePosition = true)
     {
         if (auto ph = getNodePlayHead())
-            ph->setLoopRange (loop, tracktion::toSamples (newRange, getSampleRate()));
+            ph->setLoopRange (loop, tracktion::toSamples (newRange, getSampleRate()), updatePosition);
     }
 
     void setUserIsDragging (bool isDragging)
@@ -1234,24 +1235,71 @@ void TransportControl::setLoopOut (TimePosition t)
     setLoopPoint2 (std::max (TimePosition(), t));
 }
 
-// MAGDA patch: when the loop range changes mid-session and the playhead is
-// currently in a looping session (sessionPlayheadIsLooping was decided by
-// performPlay / performRecord), push the new range to the playhead
-// immediately. The timerCallback's periodic re-assert would pick this up
-// within ~100ms anyway, but the immediate write avoids audible looping at
-// stale bounds in the window between the loop edit and the next tick —
-// notably the BPM-change path where MAGDA recomputes loop seconds against
-// the new tempo and pushes them through setLoopRange.
+// MAGDA patch: when the loop range changes mid-session, re-evaluate the active
+// playhead against the new range immediately. The timerCallback's periodic
+// re-assert would pick up an already-looping session within ~100ms, but it
+// would not engage looping for a session that started with looping disabled or
+// with the cursor past the previous loop end.
 #define MAGDA_PUSH_LOOP_RANGE_IF_SESSION_LOOPING()                          \
     do {                                                                    \
-        if (transportState->sessionPlayheadIsLooping && isPlaying()         \
-            && playbackContext != nullptr)                                  \
-        {                                                                   \
-            auto lr_ = getLoopRange();                                      \
-            lr_ = lr_.withEnd (std::max (lr_.getEnd(), lr_.getStart() + 0.001s)); \
-            playHeadWrapper->setLoopTimes (true, lr_);                      \
-        }                                                                   \
+        reevaluateActiveLoopSession();                                      \
     } while (false)
+
+void TransportControl::reevaluateActiveLoopSession()
+{
+    if (! isPlaying() || playbackContext == nullptr)
+        return;
+
+    if (! looping)
+    {
+        transportState->sessionPlayheadIsLooping = false;
+        playHeadWrapper->setLoopTimes (false, {});
+        return;
+    }
+
+    auto loopRange = getLoopRange();
+    loopRange = loopRange.withEnd (std::max (loopRange.getEnd(), loopRange.getStart() + 0.001s));
+
+    const auto currentTime = playHeadWrapper->getLiveTransportPosition();
+    const auto decision = evaluateLoopSessionDecision (currentTime, loopRange);
+    transportState->sessionPlayheadIsLooping = decision.shouldLoop;
+
+    if (transportState->sessionPlayheadIsLooping)
+    {
+        playHeadWrapper->setLoopTimes (true, loopRange, ! decision.shouldRollIn);
+
+        if (decision.shouldRollIn)
+            playHeadWrapper->setRollInToLoop (currentTime);
+    }
+    else
+    {
+        playHeadWrapper->setLoopTimes (false, {});
+    }
+}
+
+TransportControl::LoopSessionDecision TransportControl::evaluateLoopSessionDecision (TimePosition currentTime,
+                                                                                    TimeRange loopRange) const
+{
+    loopRange = loopRange.withEnd (std::max (loopRange.getEnd(), loopRange.getStart() + 0.001s));
+
+    const auto& ts = edit.tempoSequence;
+    const auto cursorBeats    = ts.toBeats (currentTime);
+    const auto loopStartBeats = ts.toBeats (loopRange.getStart());
+    const auto loopEndBeats   = ts.toBeats (loopRange.getEnd());
+    const bool cursorBeforeLoop = cursorBeats < loopStartBeats;
+    const bool cursorPastLoop   = cursorBeats >= loopEndBeats;
+
+    return { ! cursorPastLoop, cursorBeforeLoop, cursorPastLoop };
+}
+
+#if MAGDA_ENABLE_TEST_HOOKS
+TransportControl::MagdaLoopSessionDecision TransportControl::magdaTestEvaluateLoopSessionDecision (TimePosition currentTime,
+                                                                                                   TimeRange loopRange) const
+{
+    const auto decision = evaluateLoopSessionDecision (currentTime, loopRange);
+    return { decision.shouldLoop, decision.shouldRollIn, decision.cursorPastLoop };
+}
+#endif
 
 void TransportControl::setLoopPoint1 (TimePosition t)
 {

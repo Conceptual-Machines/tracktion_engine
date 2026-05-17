@@ -63,6 +63,18 @@ public:
     /** Destructor. */
     ~TransportControl() override;
 
+   #if MAGDA_ENABLE_TEST_HOOKS
+    struct MagdaLoopSessionDecision
+    {
+        bool shouldLoop = false;
+        bool shouldRollIn = false;
+        bool cursorPastLoop = false;
+    };
+
+    MagdaLoopSessionDecision magdaTestEvaluateLoopSessionDecision (TimePosition currentTime,
+                                                                   TimeRange loopRange) const;
+   #endif
+
     //==============================================================================
     /** Starts playback of an Edit.
         @param justSendMMCIfEnabled If this is true, playback isn't actually started,
@@ -457,6 +469,16 @@ private:
     std::optional<SyncPoint> performStopRecording();
 
     void performPositionChange();
+    struct LoopSessionDecision
+    {
+        bool shouldLoop = false;
+        bool shouldRollIn = false;
+        bool cursorPastLoop = false;
+    };
+
+    LoopSessionDecision evaluateLoopSessionDecision (TimePosition currentTime,
+                                                     TimeRange loopRange) const;
+    void reevaluateActiveLoopSession();
     void performRewindButtonChanged();
     void performFastForwardButtonChanged();
     void performNudgeLeft();
