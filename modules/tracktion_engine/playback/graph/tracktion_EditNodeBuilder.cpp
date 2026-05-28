@@ -1310,13 +1310,15 @@ std::unique_ptr<tracktion::graph::Node> createNodeForPlugin (Plugin& plugin, con
     // MAGDA: Per-device gain + metering
     if (auto* mgr = magda::DeviceMeteringManager::getInstanceForEdit (plugin.edit))
     {
-        auto deviceId = mgr->getDeviceIdForPlugin (&plugin);
-        if (deviceId >= 0)
+        auto devicePath = mgr->getDevicePathForPlugin (&plugin);
+        if (devicePath.isValid())
         {
-            auto& measurer = mgr->getOrCreateMeasurer (deviceId);
+            DBG ("[DeviceMeter] graph tap plugin='" << plugin.getName()
+                                                    << "' path=" << devicePath.toString());
+            auto& measurer = mgr->getOrCreateMeasurer (devicePath);
 
             // Insert gain node before metering so meters reflect post-gain levels
-            if (auto* gainAtomic = mgr->getGainAtomic (deviceId))
+            if (auto* gainAtomic = mgr->getGainAtomic (devicePath))
                 node = makeNode<DeviceGainNode> (std::move (node), *gainAtomic);
 
             node = makeNode<LevelMeasuringNode> (std::move (node), measurer);
@@ -1398,12 +1400,14 @@ std::unique_ptr<tracktion::graph::Node> createPluginNodeForList (PluginList& lis
             // MAGDA: Per-device gain + metering for instrument racks
             if (auto* mgr = magda::DeviceMeteringManager::getInstanceForEdit (list.getEdit()))
             {
-                auto deviceId = mgr->getDeviceIdForPlugin (p);
-                if (deviceId >= 0)
+                auto devicePath = mgr->getDevicePathForPlugin (p);
+                if (devicePath.isValid())
                 {
-                    auto& measurer = mgr->getOrCreateMeasurer (deviceId);
+                    DBG ("[DeviceMeter] graph tap rack='" << p->getName()
+                                                          << "' path=" << devicePath.toString());
+                    auto& measurer = mgr->getOrCreateMeasurer (devicePath);
 
-                    if (auto* gainAtomic = mgr->getGainAtomic (deviceId))
+                    if (auto* gainAtomic = mgr->getGainAtomic (devicePath))
                         node = makeNode<DeviceGainNode> (std::move (node), *gainAtomic);
 
                     node = makeNode<LevelMeasuringNode> (std::move (node), measurer);
