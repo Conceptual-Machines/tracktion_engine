@@ -1313,8 +1313,6 @@ std::unique_ptr<tracktion::graph::Node> createNodeForPlugin (Plugin& plugin, con
         auto devicePath = mgr->getDevicePathForPlugin (&plugin);
         if (devicePath.isValid())
         {
-            DBG ("[DeviceMeter] graph tap plugin='" << plugin.getName()
-                                                    << "' path=" << devicePath.toString());
             auto& measurer = mgr->getOrCreateMeasurer (devicePath);
 
             // Insert gain node before metering so meters reflect post-gain levels
@@ -1403,8 +1401,6 @@ std::unique_ptr<tracktion::graph::Node> createPluginNodeForList (PluginList& lis
                 auto devicePath = mgr->getDevicePathForPlugin (p);
                 if (devicePath.isValid())
                 {
-                    DBG ("[DeviceMeter] graph tap rack='" << p->getName()
-                                                          << "' path=" << devicePath.toString());
                     auto& measurer = mgr->getOrCreateMeasurer (devicePath);
 
                     if (auto* gainAtomic = mgr->getGainAtomic (devicePath))
