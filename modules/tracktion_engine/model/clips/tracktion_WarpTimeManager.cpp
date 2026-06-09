@@ -269,6 +269,16 @@ WarpTimeManager::~WarpTimeManager()
     edit.engine.getWarpTimeFactory().removeWarpTimeManager (*this);
 }
 
+void WarpTimeManager::addListener (Listener* listener)
+{
+    listeners.add (listener);
+}
+
+void WarpTimeManager::removeListener (Listener* listener)
+{
+    listeners.remove (listener);
+}
+
 void WarpTimeManager::setSourceFile (const AudioFile& af)
 {
     jassert (clip == nullptr);
@@ -583,7 +593,7 @@ juce::UndoManager* WarpTimeManager::getUndoManager() const
     return &edit.getUndoManager();
 }
 
-void WarpTimeManager::jobFinished (RenderManager::Job& job, bool /*completedOk*/)
+void WarpTimeManager::jobFinished (RenderManager::Job& job, bool completedOk)
 {
     if (auto tdj = dynamic_cast<TransientDetectionJob*> (&job))
     {
@@ -593,6 +603,10 @@ void WarpTimeManager::jobFinished (RenderManager::Job& job, bool /*completedOk*/
 
     job.removeListener (this);
     transientDetectionJob = nullptr;
+
+    listeners.call ([this, completedOk] (Listener& l) {
+        l.transientDetectionFinished (*this, completedOk);
+    });
 }
 
 //==============================================================================
