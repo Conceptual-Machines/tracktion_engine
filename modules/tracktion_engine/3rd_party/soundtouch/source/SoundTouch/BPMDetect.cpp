@@ -293,10 +293,15 @@ void BPMDetect::updateXCorr(int process_samples)
     int offs;
     SAMPLETYPE *pBuffer;
 
+    if ((buffer == nullptr) || (buffer->numSamples() < (uint)(process_samples + windowLen)))
+        return;
+
     assert(buffer->numSamples() >= (uint)(process_samples + windowLen));
     assert(process_samples == XCORR_UPDATE_SEQUENCE);
 
     pBuffer = buffer->ptrBegin();
+    if (pBuffer == nullptr)
+        return;
 
     // calculate decay factor for xcorr filtering
     float xcorr_decay = (float)pow(0.5, 1.0 / (XCORR_DECAY_TIME_CONSTANT * TARGET_SRATE / process_samples));
@@ -331,9 +336,15 @@ void BPMDetect::updateBeatPos(int process_samples)
 {
     SAMPLETYPE *pBuffer;
 
+    if ((buffer == nullptr) || (buffer->numSamples() < (uint)(process_samples + windowLen)))
+        return;
+
     assert(buffer->numSamples() >= (uint)(process_samples + windowLen));
 
     pBuffer = buffer->ptrBegin();
+    if (pBuffer == nullptr)
+        return;
+
     assert(process_samples == XCORR_UPDATE_SEQUENCE / 2);
 
     //    static double thr = 0.0003;
@@ -413,6 +424,9 @@ void BPMDetect::updateBeatPos(int process_samples)
 void BPMDetect::inputSamples(const SAMPLETYPE *samples, int numSamples)
 {
     SAMPLETYPE decimated[DECIMATED_BLOCK_SIZE];
+
+    if (samples == nullptr || numSamples <= 0 || channels <= 0 || decimateBy <= 0)
+        return;
 
     // iterate so that max INPUT_BLOCK_SAMPLES processed per iteration
     while (numSamples > 0)

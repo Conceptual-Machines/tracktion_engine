@@ -77,6 +77,15 @@ public:
     /** Destructor. */
     ~WarpTimeManager() override;
 
+    struct Listener
+    {
+        virtual ~Listener() = default;
+        virtual void transientDetectionFinished (WarpTimeManager&, bool completedOk) = 0;
+    };
+
+    void addListener (Listener*);
+    void removeListener (Listener*);
+
     //==============================================================================
     /** Sets a source fiel to warp. */
     void setSourceFile (const AudioFile&);
@@ -155,7 +164,7 @@ public:
     float getTransientSensitivity() const noexcept          { return transientSensitivity; }
 
     /** Re-runs transient detection with the current sensitivity.
-        Results can be polled via getTransientTimes().
+        Completion is reported to listeners; results can be read via getTransientTimes().
     */
     void detectTransients();
 
@@ -214,6 +223,7 @@ private:
     std::unique_ptr<WarpMarkerList> markers;
     RenderManager::Job::Ptr transientDetectionJob;
     std::pair<bool, juce::Array<TimePosition>> transientTimes { false, {} };
+    juce::ListenerList<Listener> listeners;
     float transientSensitivity = 0.5f;
     std::unique_ptr<Edit::LoadFinishedCallback<WarpTimeManager>> editLoadedCallback;
 
