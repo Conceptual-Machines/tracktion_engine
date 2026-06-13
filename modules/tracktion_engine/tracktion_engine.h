@@ -442,6 +442,7 @@ namespace tracktion { inline namespace engine
 #include "model/automation/tracktion_MacroParameter.h"
 #include "model/automation/tracktion_Modifier.h"
 #include "model/automation/modifiers/tracktion_ModifierCommon.h"
+#include "model/automation/modifiers/tracktion_ADSRModifier.h"
 #include "model/automation/modifiers/tracktion_BreakpointOscillatorModifier.h"
 #include "model/automation/modifiers/tracktion_EnvelopeFollowerModifier.h"
 #include "model/automation/modifiers/tracktion_LFOModifier.h"

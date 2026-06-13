@@ -750,7 +750,7 @@ private:
     {
         return v.hasType (IDs::LFO) || v.hasType (IDs::BREAKPOINTOSCILLATOR) || v.hasType (IDs::MACRO)
             || v.hasType (IDs::STEP) || v.hasType (IDs::ENVELOPEFOLLOWER) || v.hasType (IDs::RANDOM)
-            || v.hasType (IDs::MIDITRACKER) || v.hasType (IDs::AUTOMATIONCURVE);
+            || v.hasType (IDs::MIDITRACKER) || v.hasType (IDs::AUTOMATIONCURVE) || v.hasType (IDs::ADSR);
     }
 
     bool isSuitableType (const juce::ValueTree& v) const override

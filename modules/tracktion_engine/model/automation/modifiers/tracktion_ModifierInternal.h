@@ -11,6 +11,94 @@
 namespace tracktion { inline namespace engine
 {
 
+namespace BezierHelpers
+{
+    template<typename Type>
+    static juce::Point<Type> getQuadraticControlPoint (juce::Point<Type> start,
+                                                       juce::Point<Type> end,
+                                                       Type curve)
+    {
+        static_assert (std::is_floating_point<Type>::value, "");
+        jassert (curve >= -0.5 && curve <= 0.5);
+
+        const Type x1 = start.x;
+        const Type y1 = start.y;
+        const Type x2 = end.x;
+        const Type y2 = end.y;
+        const Type c  = juce::jlimit (-1.0f, 1.0f, curve * 2.0f);
+
+        if (y2 > y1)
+        {
+            const Type run  = x2 - x1;
+            const Type rise = y2 - y1;
+
+            const Type xc = x1 + run / 2;
+            const Type yc = y1 + rise / 2;
+
+            const Type x = xc - run / 2 * -c;
+            const Type y = yc + rise / 2 * -c;
+
+            return { x, y };
+        }
+
+        const Type run  = x2 - x1;
+        const Type rise = y1 - y2;
+
+        const Type xc = x1 + run / 2;
+        const Type yc = y2 + rise / 2;
+
+        const Type x = xc - run / 2 * -c;
+        const Type y = yc - rise / 2 * -c;
+
+        return { x, y };
+    }
+
+    template<typename Type>
+    static Type getQuadraticYFromX (Type x, Type x1, Type y1, Type xb, Type yb, Type x2, Type y2)
+    {
+        // test for straight lines and bail out
+        if (x1 == x2 || y1 == y2)
+            return y1;
+
+        // ok, we have a bezier curve with one control point,
+        // we know x, we need to find y
+
+        // flip the bezier equation around so its an quadratic equation
+        const Type a = x1 - 2 * xb + x2;
+        const Type b = -2 * x1 + 2 * xb;
+        const Type c = x1 - x;
+
+        // solve for t, [0..1]
+        Type t = 0;
+
+        if (a == 0.0f)
+        {
+            t = -c / b;
+        }
+        else
+        {
+            t = (-b + std::sqrt (b * b - 4 * a * c)) / (2 * a);
+
+            if (t < 0.0f || t > 1.0f)
+                t = (-b - std::sqrt (b * b - 4 * a * c)) / (2 * a);
+        }
+
+        // find y using the t we just found
+        const Type y = (std::pow (1 - t, 2.0f) * y1) + 2 * t * (1 - t) * yb + std::pow (t, 2.0f) * y2;
+        return (Type) y;
+    }
+
+    template<typename Type>
+    static Type getQuadraticYFromX (Type x,
+                                    juce::Point<Type> startPoint,
+                                    juce::Point<Type> controlPoint,
+                                    juce::Point<Type> endPoint)
+    {
+        return getQuadraticYFromX (x, startPoint.x, startPoint.y, controlPoint.x, controlPoint.y, endPoint.x, endPoint.y);
+    }
+}
+
+//==============================================================================
 namespace PredefinedWavetable
 {
     static inline float getSinSample (float phase)

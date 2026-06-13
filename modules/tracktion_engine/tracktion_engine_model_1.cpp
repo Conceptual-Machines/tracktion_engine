@@ -56,6 +56,7 @@ using namespace std::literals;
 #include "model/automation/tracktion_ParameterControlMappings.cpp"
 #include "model/automation/tracktion_Modifier.cpp"
 #include "model/automation/modifiers/tracktion_ModifierCommon.cpp"
+#include "model/automation/modifiers/tracktion_ADSRModifier.cpp"
 #include "model/automation/modifiers/tracktion_BreakpointOscillatorModifier.cpp"
 #include "model/automation/modifiers/tracktion_EnvelopeFollowerModifier.cpp"
 #include "model/automation/modifiers/tracktion_LFOModifier.cpp"
