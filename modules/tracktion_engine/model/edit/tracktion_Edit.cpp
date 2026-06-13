@@ -317,6 +317,7 @@ struct Edit::TreeWatcher   : public juce::ValueTree::Listener
              || c.hasType (IDs::MACROPARAMETER)
              || p.hasType (IDs::MAPPEDPARAMETER)
              || c.hasType (IDs::LFO)
+             || c.hasType (IDs::ADSR)
              || c.hasType (IDs::BREAKPOINTOSCILLATOR)
              || c.hasType (IDs::STEP)
              || c.hasType (IDs::ENVELOPEFOLLOWER)
