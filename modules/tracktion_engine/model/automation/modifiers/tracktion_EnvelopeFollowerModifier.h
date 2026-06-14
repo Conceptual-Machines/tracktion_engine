@@ -41,6 +41,17 @@ public:
     void applyToBuffer (const PluginRenderContext&) override;
 
     //==============================================================================
+    /** MAGDA extension: drive the follower from an externally supplied level
+        (e.g. a sidechain source track) instead of the host plugin chain audio.
+        When enabled, applyToBuffer feeds the supplied level through the same
+        attack/hold/release envelope DSP, so all the follower's controls still
+        apply. setExternalInput is audio-thread safe.
+    */
+    void setUsesExternalInput (bool b) noexcept { usesExternalInput.store (b, std::memory_order_release); }
+    bool getUsesExternalInput() const noexcept  { return usesExternalInput.load (std::memory_order_acquire); }
+    void setExternalInput (float level) noexcept { externalInput.store (level, std::memory_order_release); }
+
+    //==============================================================================
     struct Assignment : public AutomatableParameter::ModifierAssignment
     {
         Assignment (const juce::ValueTree&, const EnvelopeFollowerModifier&);
@@ -65,6 +76,8 @@ private:
     class EnvelopeFollower;
 
     std::atomic<float> envelopeValue;
+    std::atomic<bool> usesExternalInput { false };
+    std::atomic<float> externalInput { 0.0f };
     std::unique_ptr<EnvelopeFollower> envelopeFollower;
     juce::IIRFilter lowPassFilter, highPassFilter;
     float currentLowPassFrequency = 0.0f, currentHighPassFrequency = 0.0f;

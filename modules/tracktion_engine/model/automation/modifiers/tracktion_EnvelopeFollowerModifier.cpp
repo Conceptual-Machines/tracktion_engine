@@ -320,11 +320,26 @@ void EnvelopeFollowerModifier::deinitialise()
 void EnvelopeFollowerModifier::applyToBuffer (const PluginRenderContext& pc)
 {
     setEditTime (pc.editTime.getStart());
+    updateParameterStreams (pc.editTime.getStart());
+
+    // MAGDA extension: follow an externally supplied level (sidechain source
+    // track) instead of the host audio. Feed the level as a constant block
+    // through the same envelope DSP so attack/hold/release/gain still apply.
+    if (usesExternalInput.load (std::memory_order_acquire))
+    {
+        const int numSamples = pc.bufferNumSamples > 0 ? pc.bufferNumSamples : 1;
+        AudioScratchBuffer scratch (1, numSamples);
+        float* d = scratch.buffer.getWritePointer (0);
+        const float lvl = externalInput.load (std::memory_order_acquire);
+        for (int i = 0; i < numSamples; ++i)
+            d[i] = lvl;
+
+        processBlock (scratch.buffer);
+        return;
+    }
 
     if (pc.destBuffer == nullptr)
         return;
-
-    updateParameterStreams (pc.editTime.getStart());
 
     juce::AudioBuffer<float> ab (pc.destBuffer->getArrayOfWritePointers(),
                            pc.destBuffer->getNumChannels(),
