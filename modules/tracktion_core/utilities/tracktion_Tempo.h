@@ -162,6 +162,9 @@ namespace tempo
         /** Returns the tempo at a position. */
         double getBpmAt (TimePosition) const;
 
+        /** Returns the tempo at a beat position. */
+        double getBpmAtBeat (BeatPosition) const;
+
         /** Returns the number of beats per second at a position. */
         BeatsPerSecond getBeatsPerSecondAt (TimePosition) const;
 
@@ -698,6 +701,20 @@ inline double Sequence::getBpmAt (TimePosition t) const
         auto& it = sections[(size_t) i];
 
         if (it.startTime <= t || i == 0)
+            return it.bpm;
+    }
+
+    assert(false);
+    return 120.0;
+}
+
+inline double Sequence::getBpmAtBeat (BeatPosition beat) const
+{
+    for (int i = (int) sections.size(); --i >= 0;)
+    {
+        auto& it = sections[(size_t) i];
+
+        if (it.startBeat <= beat || i == 0)
             return it.bpm;
     }
 
