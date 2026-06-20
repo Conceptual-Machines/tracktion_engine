@@ -485,6 +485,12 @@ double TempoSequence::getBpmAt (TimePosition time) const
     return internalSequence.getBpmAt (time);
 }
 
+double TempoSequence::getBpmAtBeat (BeatPosition beat) const
+{
+    updateTempoDataIfNeeded();
+    return internalSequence.getBpmAtBeat (beat);
+}
+
 double TempoSequence::getBeatsPerSecondAt (TimePosition time, bool lengthOfOneBeatDependsOnTimeSignature) const
 {
     if (lengthOfOneBeatDependsOnTimeSignature)

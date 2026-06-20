@@ -102,6 +102,12 @@ public:
     */
     double getBpmAt (TimePosition) const; // takes ramping into account
 
+    /** Returns the tempo at a given beat position.
+        N.B. This is the actual tempo at the beat, including any curves.
+        I.e. it is not just the bpm of the previous TempoSetting
+    */
+    double getBpmAtBeat (BeatPosition) const; // takes ramping into account
+
     /** Returns the tempo at a given position.
         N.B. This is the actual tempo at the time, including any curves.
         I.e. it is not just the bpm of the previous TempoSetting
