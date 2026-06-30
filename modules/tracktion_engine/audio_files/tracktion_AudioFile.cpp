@@ -965,8 +965,14 @@ void AudioFileManager::validateFile (const AudioFile& file, bool updateInfo)
 void AudioFileManager::checkFileForChangesAsync (const AudioFile& file)
 {
     const juce::ScopedLock sl (knownFilesLock);
-    filesToCheck.addIfNotAlreadyThere (file);
-    triggerAsyncUpdate();
+
+    // Only trigger when this call actually queued new work. Triggering on every
+    // call (including duplicates) lets a second coalesced run-loop message exist
+    // for one queued file; the second handleAsyncUpdate() then runs with an
+    // empty queue. The handler also guards against that, but not posting the
+    // spurious trigger here removes the race at its source.
+    if (filesToCheck.addIfNotAlreadyThere (file))
+        triggerAsyncUpdate();
 }
 
 void AudioFileManager::handleAsyncUpdate()
@@ -976,6 +982,16 @@ void AudioFileManager::handleAsyncUpdate()
 
     {
         const juce::ScopedLock sl (knownFilesLock);
+
+        // triggerAsyncUpdate() is posted both from a background thread
+        // (checkFileForChangesAsync) and re-entrantly from here, so two
+        // coalesced run-loop messages can briefly coexist for a single queued
+        // file. The second one runs with filesToCheck already drained; without
+        // this guard getUnchecked (size() - 1) reads element[-1] and returns a
+        // garbage AudioFile whose File string pointer is invalid (SIGSEGV).
+        if (filesToCheck.isEmpty())
+            return;
+
         fileToCheck = filesToCheck.getUnchecked (filesToCheck.size() - 1);
         filesToCheck.removeLast();
 
