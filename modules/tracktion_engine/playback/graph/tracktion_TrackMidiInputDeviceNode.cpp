@@ -33,7 +33,12 @@ std::vector<tracktion::graph::Node*> TrackMidiInputDeviceNode::getDirectInputNod
 
 tracktion::graph::NodeProperties TrackMidiInputDeviceNode::getNodeProperties()
 {
-    return input->getNodeProperties();
+    auto props = input->getNodeProperties();
+
+    if (props.nodeID != 0)
+        hash_combine (props.nodeID, static_cast<size_t> (11989671270979646003ul)); // "TrackMidiInputDeviceNode"
+
+    return props;
 }
 
 void TrackMidiInputDeviceNode::prepareToPlay (const tracktion::graph::PlaybackInitialisationInfo& info)

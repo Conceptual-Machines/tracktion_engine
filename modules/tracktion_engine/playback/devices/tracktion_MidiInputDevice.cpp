@@ -1602,8 +1602,13 @@ bool MidiInputDevice::handleIncomingMessage (juce::MidiMessage& m)
             return false;
     }
 
-    if (m.getTimeStamp() == 0 || (! engine.getEngineBehaviour().isMidiDriverUsedForIncommingMessageTiming()))
-        m.setTimeStamp (juce::Time::getMillisecondCounterHiRes() * 0.001);
+    // Track devices are fed by TrackMidiInputDeviceNode with edit-stream-time
+    // stamps, never by a MIDI driver — overwriting them with wall-clock time
+    // (when the host disables driver timing) would make the recorder drop
+    // every event as out-of-range.
+    if (! isTrackDevice())
+        if (m.getTimeStamp() == 0 || (! engine.getEngineBehaviour().isMidiDriverUsedForIncommingMessageTiming()))
+            m.setTimeStamp (juce::Time::getMillisecondCounterHiRes() * 0.001);
 
     m.addToTimeStamp (adjustSecs);
 
