@@ -353,7 +353,8 @@ void PluginNode::replaceLatencyProcessorsIfPossible (NodeGraph* nodeGraphToRepla
                 processor = oldProcessor;
         };
 
-        reuseProcessor (latencyProcessor, oldNode->latencyProcessor);
+        if (canProcessBypassed)
+            reuseProcessor (latencyProcessor, oldNode->latencyProcessor);
         reuseProcessor (deltaLatencyProcessor, oldNode->deltaLatencyProcessor);
     }
 }
