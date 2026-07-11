@@ -1356,13 +1356,14 @@ std::unique_ptr<tracktion::graph::Node> createNodeForRackInstance (RackInstance&
     returnChannelMap[1] = { rackInstance.rightOutputComesFrom - 1, 1, rackInstance.rightOutDb };
     node = makeNode<RackInstanceNode> (rackInstance, std::move (node), std::move (returnChannelMap), processState, sampleRateAndBlockSize);
 
+    RackInstance::Ptr rack (&rackInstance);
     return makeNode<RackReturnNode> (std::move (node),
-                                     [rack = &rackInstance, wetGain = rackInstance.wetGain]
+                                     [rack, wetGain = rackInstance.wetGain]
                                      {
                                          return rack->isDeltaSoloEnabled() ? 1.0f : wetGain->getCurrentValue();
                                      },
                                      inputNode,
-                                     [rack = &rackInstance, dryGain = rackInstance.dryGain]
+                                     [rack, dryGain = rackInstance.dryGain]
                                      {
                                          return rack->isDeltaSoloEnabled() ? -1.0f : dryGain->getCurrentValue();
                                      });

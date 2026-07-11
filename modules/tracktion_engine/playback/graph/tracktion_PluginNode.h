@@ -77,7 +77,7 @@ private:
     TimeDuration automationAdjustmentTime;
 
     std::shared_ptr<tracktion::graph::LatencyProcessor> latencyProcessor;
-    std::unique_ptr<tracktion::graph::LatencyProcessor> deltaLatencyProcessor;
+    std::shared_ptr<tracktion::graph::LatencyProcessor> deltaLatencyProcessor;
     juce::AudioBuffer<float> deltaDryBuffer;
     std::optional<NodeProperties> cachedNodeProperties;
     bool isPrepared = false, canUseSourceBuffers = false;
@@ -85,7 +85,7 @@ private:
     //==============================================================================
     void initialisePlugin (double sampleRateToUse, int blockSizeToUse);
     PluginRenderContext getPluginRenderContext (TimeRange, juce::AudioBuffer<float>&);
-    void replaceLatencyProcessorIfPossible (NodeGraph*);
+    void replaceLatencyProcessorsIfPossible (NodeGraph*);
 };
 
 }} // namespace tracktion { inline namespace engine
