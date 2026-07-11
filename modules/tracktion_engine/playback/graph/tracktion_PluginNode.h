@@ -10,6 +10,8 @@
 
 #pragma once
 
+#include "tracktion_DeltaSolo.h"
+
 namespace tracktion { inline namespace engine
 {
 
@@ -75,13 +77,15 @@ private:
     TimeDuration automationAdjustmentTime;
 
     std::shared_ptr<tracktion::graph::LatencyProcessor> latencyProcessor;
+    std::shared_ptr<tracktion::graph::LatencyProcessor> deltaLatencyProcessor;
+    juce::AudioBuffer<float> deltaDryBuffer;
     std::optional<NodeProperties> cachedNodeProperties;
     bool isPrepared = false, canUseSourceBuffers = false;
 
     //==============================================================================
     void initialisePlugin (double sampleRateToUse, int blockSizeToUse);
     PluginRenderContext getPluginRenderContext (TimeRange, juce::AudioBuffer<float>&);
-    void replaceLatencyProcessorIfPossible (NodeGraph*);
+    void replaceLatencyProcessorsIfPossible (NodeGraph*);
 };
 
 }} // namespace tracktion { inline namespace engine

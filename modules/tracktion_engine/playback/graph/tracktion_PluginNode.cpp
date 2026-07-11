@@ -103,16 +103,24 @@ void PluginNode::prepareToPlay (const tracktion::graph::PlaybackInitialisationIn
                             && dynamic_cast<ExternalPlugin*> (plugin.get()) != nullptr
                             && latencyNumSamples > 0;
 
+    replaceLatencyProcessorsIfPossible (info.nodeGraphToReplace);
+
     if (canProcessBypassed)
     {
-        replaceLatencyProcessorIfPossible (info.nodeGraphToReplace);
-
         if (! latencyProcessor)
         {
             latencyProcessor = std::make_shared<tracktion::graph::LatencyProcessor>();
             latencyProcessor->setLatencyNumSamples (latencyNumSamples);
             latencyProcessor->prepareToPlay (info.sampleRate, info.blockSize, props.numberOfChannels);
         }
+    }
+
+    deltaDryBuffer.setSize (props.numberOfChannels, info.blockSize, false, false, true);
+    if (latencyNumSamples > 0 && ! deltaLatencyProcessor)
+    {
+        deltaLatencyProcessor = std::make_shared<tracktion::graph::LatencyProcessor>();
+        deltaLatencyProcessor->setLatencyNumSamples (latencyNumSamples);
+        deltaLatencyProcessor->prepareToPlay (info.sampleRate, info.blockSize, props.numberOfChannels);
     }
 
     isPrepared = true;
@@ -154,6 +162,28 @@ void PluginNode::process (ProcessContext& pc)
 
     const auto numInputChannelsToCopy = std::min (inputAudioBlock.getNumChannels(),
                                                   outputAudioView.getNumChannels());
+    const bool deltaSoloEnabled = plugin->isDeltaSoloEnabled();
+
+    auto deltaDryView = toBufferView (deltaDryBuffer)
+                            .getFirstChannels (numInputChannelsToCopy)
+                            .getFrameRange (frameRangeWithStartAndLength (0, blockNumSamples));
+
+    if (numInputChannelsToCopy > 0)
+    {
+        if (deltaLatencyProcessor)
+        {
+            deltaLatencyProcessor->writeAudio (inputAudioBlock.getFirstChannels (numInputChannelsToCopy));
+            if (deltaSoloEnabled)
+                deltaLatencyProcessor->readAudioOverwriting (deltaDryView);
+            else
+                deltaLatencyProcessor->clearAudio ((int) blockNumSamples);
+        }
+        else if (deltaSoloEnabled)
+        {
+            choc::buffer::copy (deltaDryView,
+                                inputAudioBlock.getFirstChannels (numInputChannelsToCopy));
+        }
+    }
 
     if (latencyProcessor)
     {
@@ -268,6 +298,13 @@ void PluginNode::process (ProcessContext& pc)
         }
     }
 
+    if (shouldProcessPlugin && plugin->isEnabled() && numInputChannelsToCopy > 0)
+    {
+        plugin_node_detail::applyDeltaSolo (
+            outputAudioView.getFirstChannels (numInputChannelsToCopy), deltaDryView,
+            deltaSoloEnabled);
+    }
+
     // Some plugins flake and add NaNs so zero these out to avoid killing all the audio downstream
     sanitise (outputAudioView);
 }
@@ -293,7 +330,7 @@ PluginRenderContext PluginNode::getPluginRenderContext (TimeRange editTime, juce
              isRendering, canProcessBypassed };
 }
 
-void PluginNode::replaceLatencyProcessorIfPossible (NodeGraph* nodeGraphToReplace)
+void PluginNode::replaceLatencyProcessorsIfPossible (NodeGraph* nodeGraphToReplace)
 {
     if (nodeGraphToReplace == nullptr)
         return;
@@ -306,19 +343,19 @@ void PluginNode::replaceLatencyProcessorIfPossible (NodeGraph* nodeGraphToReplac
 
     if (auto oldNode = findNodeWithID<PluginNode> (*nodeGraphToReplace, nodeIDToLookFor))
     {
-        if (! oldNode->latencyProcessor)
-            return;
-
-        if (! latencyProcessor)
+        auto reuseProcessor = [this, &props] (auto& processor, const auto& oldProcessor)
         {
-            if (oldNode->latencyProcessor->hasConfiguration (latencyNumSamples, sampleRate, props.numberOfChannels))
-                latencyProcessor = oldNode->latencyProcessor;
+            if (! oldProcessor)
+                return;
 
-            return;
-        }
+            if ((! processor && oldProcessor->hasConfiguration (latencyNumSamples, sampleRate, props.numberOfChannels))
+                || (processor && processor->hasSameConfigurationAs (*oldProcessor)))
+                processor = oldProcessor;
+        };
 
-        if (latencyProcessor->hasSameConfigurationAs (*oldNode->latencyProcessor))
-            latencyProcessor = oldNode->latencyProcessor;
+        if (canProcessBypassed)
+            reuseProcessor (latencyProcessor, oldNode->latencyProcessor);
+        reuseProcessor (deltaLatencyProcessor, oldNode->deltaLatencyProcessor);
     }
 }
 
