@@ -115,6 +115,14 @@ void PluginNode::prepareToPlay (const tracktion::graph::PlaybackInitialisationIn
         }
     }
 
+    deltaDryBuffer.setSize (props.numberOfChannels, info.blockSize, false, false, true);
+    if (latencyNumSamples > 0)
+    {
+        deltaLatencyProcessor = std::make_unique<tracktion::graph::LatencyProcessor>();
+        deltaLatencyProcessor->setLatencyNumSamples (latencyNumSamples);
+        deltaLatencyProcessor->prepareToPlay (info.sampleRate, info.blockSize, props.numberOfChannels);
+    }
+
     isPrepared = true;
 
     if (info.enableNodeMemorySharing && input->numOutputNodes == 1)
@@ -154,6 +162,24 @@ void PluginNode::process (ProcessContext& pc)
 
     const auto numInputChannelsToCopy = std::min (inputAudioBlock.getNumChannels(),
                                                   outputAudioView.getNumChannels());
+
+    auto deltaDryView = toBufferView (deltaDryBuffer)
+                            .getFirstChannels (numInputChannelsToCopy)
+                            .getFrameRange (frameRangeWithStartAndLength (0, blockNumSamples));
+
+    if (numInputChannelsToCopy > 0)
+    {
+        if (deltaLatencyProcessor)
+        {
+            deltaLatencyProcessor->writeAudio (inputAudioBlock.getFirstChannels (numInputChannelsToCopy));
+            deltaLatencyProcessor->readAudioOverwriting (deltaDryView);
+        }
+        else
+        {
+            choc::buffer::copy (deltaDryView,
+                                inputAudioBlock.getFirstChannels (numInputChannelsToCopy));
+        }
+    }
 
     if (latencyProcessor)
     {
@@ -266,6 +292,13 @@ void PluginNode::process (ProcessContext& pc)
 
             latencyProcessor->readMIDI (outputBuffers.midi, (int) blockNumSamples);
         }
+    }
+
+    if (shouldProcessPlugin && plugin->isEnabled() && numInputChannelsToCopy > 0)
+    {
+        plugin_node_detail::applyDeltaSolo (
+            outputAudioView.getFirstChannels (numInputChannelsToCopy), deltaDryView,
+            plugin->isDeltaSoloEnabled());
     }
 
     // Some plugins flake and add NaNs so zero these out to avoid killing all the audio downstream

@@ -151,6 +151,11 @@ public:
     virtual void setEnabled (bool);
     bool isEnabled() const noexcept                         { return enabled.get(); }
 
+    /** Enables a host-owned delta monitor (processed output minus latency-aligned input).
+        This is runtime state and is deliberately not stored in the plugin ValueTree. */
+    void setDeltaSoloEnabled (bool shouldBeEnabled) noexcept { deltaSoloEnabled.store (shouldBeEnabled); }
+    bool isDeltaSoloEnabled() const noexcept                 { return deltaSoloEnabled.load(); }
+
     /** This is a bit different to being enabled as when frozen a plugin can't be interacted with. */
     void setFrozen (bool shouldBeFrozen);
     bool isFrozen() const noexcept                          { return frozen; }
@@ -442,6 +447,7 @@ private:
     double timeToCpuScale = 0;
     std::atomic<double> cpuUsageMs { 0 };
     std::atomic<bool> isClipEffect { false };
+    std::atomic<bool> deltaSoloEnabled { false };
 
     juce::ValueTree getConnectionsTree();
     struct WireList;

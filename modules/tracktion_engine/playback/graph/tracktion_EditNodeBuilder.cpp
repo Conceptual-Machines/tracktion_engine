@@ -1357,9 +1357,15 @@ std::unique_ptr<tracktion::graph::Node> createNodeForRackInstance (RackInstance&
     node = makeNode<RackInstanceNode> (rackInstance, std::move (node), std::move (returnChannelMap), processState, sampleRateAndBlockSize);
 
     return makeNode<RackReturnNode> (std::move (node),
-                                     [wetGain = rackInstance.wetGain] { return wetGain->getCurrentValue(); },
+                                     [rack = &rackInstance, wetGain = rackInstance.wetGain]
+                                     {
+                                         return rack->isDeltaSoloEnabled() ? 1.0f : wetGain->getCurrentValue();
+                                     },
                                      inputNode,
-                                     [dryGain = rackInstance.dryGain] { return dryGain->getCurrentValue(); });
+                                     [rack = &rackInstance, dryGain = rackInstance.dryGain]
+                                     {
+                                         return rack->isDeltaSoloEnabled() ? -1.0f : dryGain->getCurrentValue();
+                                     });
 }
 
 std::unique_ptr<tracktion::graph::Node> createPluginNodeForList (PluginList& list, const TrackMuteState* trackMuteState, std::unique_ptr<Node> node,
