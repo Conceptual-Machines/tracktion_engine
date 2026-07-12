@@ -666,8 +666,7 @@ public:
                        TimeStretcher::Mode mode,
                        TimeStretcher::ElastiqueProOptions elastiqueProOptions,
                        bool circularLoopInput = false)
-        : TimeStretchReaderBase (std::move (input)), numChannels ((int) source->getNumChannels()),
-          stretchMode (mode)
+        : TimeStretchReaderBase (std::move (input)), numChannels ((int) source->getNumChannels())
     {
         timeStretcher.initialise (source->getSampleRate(), chunkSize, numChannels,
                                   mode, elastiqueProOptions, true);
@@ -691,20 +690,8 @@ public:
 
     void setPosition (SampleCount t) override
     {
-        const auto previousPosition = getReadPosition();
-        const auto delta = t - previousPosition;
-
-        if (std::abs (delta) <= 10)
+        if (std::abs (t - getReadPosition()) <= 10)
             return;
-
-        juce::String trace;
-        trace << "[StretchTrace][TimeStretchReader] event=reset reader=0x"
-              << juce::String::toHexString (reinterpret_cast<juce::pointer_sized_int> (this))
-              << " mode=" << static_cast<int> (stretchMode)
-              << " old=" << previousPosition << " target=" << t << " delta=" << delta
-              << " circular=" << static_cast<int> (canLoopContinuously)
-              << " willPrime=" << static_cast<int> (primeLoopStarts);
-        TRACKTION_LOG (trace);
 
         readPosition = (double) t;
 
@@ -727,16 +714,6 @@ public:
         // and output FIFOs already contain the loop head when the musical position wraps.
         // Only rebase the logical position; resetting either FIFO would insert
         // the algorithm's analysis latency into every cycle.
-        juce::String trace;
-        trace << "[StretchTrace][TimeStretchReader] event="
-              << (canLoopContinuously ? "continuous-loop-rebase" : "loop-reset-fallback")
-              << " reader=0x"
-              << juce::String::toHexString (reinterpret_cast<juce::pointer_sized_int> (this))
-              << " mode=" << static_cast<int> (stretchMode)
-              << " old=" << getReadPosition() << " target=" << t
-              << " circular=" << static_cast<int> (canLoopContinuously);
-        TRACKTION_LOG (trace);
-
         if (canLoopContinuously)
             readPosition = (double) t;
         else
@@ -822,7 +799,6 @@ public:
 
     static constexpr int chunkSize = 256;
     const int numChannels;
-    const TimeStretcher::Mode stretchMode;
     TimeStretcher timeStretcher;
     AudioFifo inputFifo { numChannels, chunkSize }, outputFifo { numChannels, chunkSize };
     double playbackSpeedRatio = 1.0, semitonesShift = 0.0, readPosition = 0.0;
@@ -846,16 +822,6 @@ public:
         const auto nominalWarmupFrames = juce::roundToInt (sampleRate * 0.12);
         const auto warmupFrames = ((nominalWarmupFrames + chunkSize - 1) / chunkSize) * chunkSize;
         const auto warmupSourceFrames = warmupFrames * playbackSpeedRatio;
-
-        juce::String trace;
-        trace << "[StretchTrace][TimeStretchReader] event=prime reader=0x"
-              << juce::String::toHexString (reinterpret_cast<juce::pointer_sized_int> (this))
-              << " mode=" << static_cast<int> (stretchMode)
-              << " target=" << static_cast<SampleCount> (targetPosition)
-              << " warmupOut=" << warmupFrames
-              << " warmupSource=" << static_cast<SampleCount> (warmupSourceFrames)
-              << " speed=" << playbackSpeedRatio;
-        TRACKTION_LOG (trace);
 
         readPosition = targetPosition - warmupSourceFrames;
         source->setPosition (getReadPosition());
@@ -1240,21 +1206,6 @@ public:
         else
             resamplerReader->setSpeedRatio (blockSpeedRatio);
 
-        if (isLoopWrap || ! isContiguous)
-        {
-            juce::String trace;
-            trace << "[StretchTrace][TimeRangeReader] event="
-                  << (isLoopWrap ? "loop-wrap" : "discontinuity")
-                  << " reader=0x"
-                  << juce::String::toHexString (reinterpret_cast<juce::pointer_sized_int> (this))
-                  << " targetSeconds=" << tr.getStart().inSeconds()
-                  << " endSeconds=" << tr.getEnd().inSeconds()
-                  << " contiguous=" << static_cast<int> (isContiguous)
-                  << " speed=" << blockSpeedRatio
-                  << " hasStretcher=" << static_cast<int> (timeStretchSource != nullptr);
-            TRACKTION_LOG (trace);
-        }
-
         if (isLoopWrap && timeStretchSource != nullptr)
             timeStretchSource->setLoopPosition (toSamples (tr.getStart(), getSampleRate()));
         else
@@ -1426,22 +1377,6 @@ private:
                                      || (previousPosition.has_value()
                                          && (s - *previousPosition).inBeats() < -1.0e-7));
         previousLoopPosition = e;
-
-        if (s > e || wrappedAtStart)
-        {
-            juce::String trace;
-            trace << "[StretchTrace][BeatRangeReader] event=loop-map reader=0x"
-                  << juce::String::toHexString (reinterpret_cast<juce::pointer_sized_int> (this))
-                  << " input=" << br.getStart().inBeats() << ".." << br.getEnd().inBeats()
-                  << " mapped=" << s.inBeats() << ".." << e.inBeats()
-                  << " loop=" << loopRange.getStart().inBeats() << ".."
-                  << loopRange.getEnd().inBeats()
-                  << " previous=" << (previousPosition ? previousPosition->inBeats() : -1.0)
-                  << " contiguous=" << static_cast<int> (isContiguous)
-                  << " wrappedAtStart=" << static_cast<int> (wrappedAtStart)
-                  << " splitInsideBlock=" << static_cast<int> (s > e);
-            TRACKTION_LOG (trace);
-        }
 
         if (s > e)
         {
@@ -2388,23 +2323,6 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
         }))
         warpMap.reset();
 
-    {
-        juce::String trace;
-        trace << "[StretchTrace][WaveGraph] node=" << getNodeProperties().nodeID
-              << " file=" << audioFile.getFile().getFileName()
-              << " mode=" << static_cast<int> (timeStretcherMode)
-              << " autoTempo=" << static_cast<int> (isAutoTempo)
-              << " circular=" << static_cast<int> (useCircularStretcherInput)
-              << " loopMode=" << (loopMode == LoopReader::Mode::wrap ? "wrap" : "gate")
-              << " loopSeconds=" << loopRangeForReader.getStart().inSeconds() << ".."
-              << loopRangeForReader.getEnd().inSeconds()
-              << " loopBeats=" << loopSectionBeats.getStart().inBeats() << ".."
-              << loopSectionBeats.getEnd().inBeats()
-              << " warpReader=" << static_cast<int> (warpMap.has_value())
-              << " readAhead=" << static_cast<int> (readAhead == ReadAhead::yes);
-        TRACKTION_LOG (trace);
-    }
-
     if (warpMap)
     {
         // If we're using a warp map, the looping as to be applied above the warp so the loop times don't get warped
@@ -2446,15 +2364,6 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
     }
 
     auto timeStretcher = timeStretchReader.get();
-
-    if (timeStretcher != nullptr)
-    {
-        juce::String trace;
-        trace << "[StretchTrace][WaveGraph] node=" << getNodeProperties().nodeID
-              << " stretcher=0x"
-              << juce::String::toHexString (reinterpret_cast<juce::pointer_sized_int> (timeStretcher));
-        TRACKTION_LOG (trace);
-    }
 
     std::unique_ptr<TimeRangeReader> timeRangeReader;
     std::unique_ptr<EditReader> basicEditReader;
@@ -2626,19 +2535,6 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
     {
         lastSampleFadeLength = std::min (numFrames, 40u);
         isFirstBlock = true; // Fade in the next block to avoid clicks
-    }
-
-    if (! isContiguous)
-    {
-        juce::String trace;
-        trace << "[StretchTrace][WaveOutput] event=non-contiguous node="
-              << getNodeProperties().nodeID
-              << " editBeats=" << sectionEditBeats.getStart().inBeats() << ".."
-              << sectionEditBeats.getEnd().inBeats()
-              << " firstBlockOfLoop=" << static_cast<int> (getPlayHeadState().isFirstBlockOfLoop())
-              << " containsClipStart=" << static_cast<int> (sectionContainsStartOfClip)
-              << " fadeSamples=" << static_cast<int> (lastSampleFadeLength);
-        TRACKTION_LOG (trace);
     }
 
     // Crossfade if a fade needs to be applied

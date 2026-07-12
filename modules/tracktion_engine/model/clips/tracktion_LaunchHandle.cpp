@@ -38,14 +38,6 @@ std::optional<MonotonicBeat> LaunchHandle::getQueuedEventPosition() const
 
 void LaunchHandle::play (std::optional<MonotonicBeat> pos)
 {
-    juce::String trace;
-    trace << "[StretchTrace][LaunchHandle] event=request-play handle=0x"
-          << juce::String::toHexString (reinterpret_cast<juce::pointer_sized_int> (this))
-          << " playing=" << static_cast<int> (currentPlayState.load (std::memory_order_acquire) == PlayState::playing)
-          << " queued=" << static_cast<int> (getQueuedStatus().has_value())
-          << " targetBeat=" << (pos ? pos->v.inBeats() : -1.0);
-    TRACKTION_LOG (trace);
-
     pushNextState (QueueState::playQueued, pos);
 }
 
@@ -160,27 +152,6 @@ auto LaunchHandle::advance (const SyncRange& syncRange) -> SplitStatus
 
     SplitStatus splitStatus;
 
-    auto traceStatus = [this, &splitStatus, &blockEditBeatRange,
-                        &blockMonotonicBeatRange] (const char* event)
-    {
-        juce::String trace;
-        trace << "[StretchTrace][LaunchHandle] event=" << event << " handle=0x"
-              << juce::String::toHexString (reinterpret_cast<juce::pointer_sized_int> (this))
-              << " edit=" << blockEditBeatRange.getStart().inBeats() << ".."
-              << blockEditBeatRange.getEnd().inBeats() << " mono="
-              << blockMonotonicBeatRange.v.getStart().inBeats() << ".."
-              << blockMonotonicBeatRange.v.getEnd().inBeats()
-              << " split=" << static_cast<int> (splitStatus.isSplit)
-              << " retrigger=" << static_cast<int> (splitStatus.retriggered)
-              << " playing=" << static_cast<int> (splitStatus.playing1) << ","
-              << static_cast<int> (splitStatus.playing2)
-              << " range1=" << splitStatus.range1.getStart().inBeats() << ".."
-              << splitStatus.range1.getEnd().inBeats() << " range2="
-              << splitStatus.range2.getStart().inBeats() << ".."
-              << splitStatus.range2.getEnd().inBeats();
-        TRACKTION_LOG (trace);
-    };
-
     auto continuePlayingOrStopped = [&]
     {
         splitStatus.playing1 = playState == PlayState::playing;
@@ -245,7 +216,6 @@ auto LaunchHandle::advance (const SyncRange& syncRange) -> SplitStatus
                                         MonotonicBeat { blockMonotonicBeatRange.v.getStart() },
                                         duration
                                     });
-                traceStatus ("natural-loop-at-block-start");
                 return;
             }
 
@@ -262,7 +232,6 @@ auto LaunchHandle::advance (const SyncRange& syncRange) -> SplitStatus
                                     MonotonicBeat { blockMonotonicBeatRange.v.getStart() + firstSplitLength },
                                     secondSplitLength
                                 });
-            traceStatus ("natural-loop-split");
         }
     };
 
@@ -312,9 +281,6 @@ auto LaunchHandle::advance (const SyncRange& syncRange) -> SplitStatus
                                                 });
                             currentPlayState.store (PlayState::playing, std::memory_order_release);
                         }
-
-                        if (splitStatus.retriggered)
-                            traceStatus ("consume-quantized-retrigger-before-block");
 
                         clearNextState();
                     }
@@ -370,9 +336,6 @@ auto LaunchHandle::advance (const SyncRange& syncRange) -> SplitStatus
                             currentPlayState.store (PlayState::playing, std::memory_order_release);
                         }
 
-                        if (splitStatus.retriggered)
-                            traceStatus ("consume-quantized-retrigger-in-block");
-
                         clearNextState();
                     }
                     else
@@ -394,8 +357,6 @@ auto LaunchHandle::advance (const SyncRange& syncRange) -> SplitStatus
                                             duration
                                         });
                     currentPlayState.store (PlayState::playing, std::memory_order_release);
-                    if (splitStatus.retriggered)
-                        traceStatus ("consume-immediate-retrigger");
                     clearNextState();
                 }
 

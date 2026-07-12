@@ -159,30 +159,6 @@ void SlotControlNode::process (ProcessContext& pc)
 
         auto splitStatus = launchHandle->advance (syncRange);
 
-        const bool naturalLoop = splitStatus.isSplit
-                              && splitStatus.playing1 && splitStatus.playing2
-                              && ! splitStatus.retriggered;
-
-        if (naturalLoop || splitStatus.retriggered)
-        {
-            juce::String trace;
-            trace << "[StretchTrace][SlotControl] event="
-                  << (splitStatus.retriggered ? "retrigger" : "natural-loop")
-                  << " handle=0x"
-                  << juce::String::toHexString (reinterpret_cast<juce::pointer_sized_int> (launchHandle.get()))
-                  << " node=" << getNodeProperties().nodeID
-                  << " split=" << static_cast<int> (splitStatus.isSplit)
-                  << " playing=" << static_cast<int> (splitStatus.playing1) << ","
-                  << static_cast<int> (splitStatus.playing2)
-                  << " range1=" << splitStatus.range1.getStart().inBeats() << ".."
-                  << splitStatus.range1.getEnd().inBeats() << " range2="
-                  << splitStatus.range2.getStart().inBeats() << ".."
-                  << splitStatus.range2.getEnd().inBeats()
-                  << " edit=" << editBeatRange.getStart().inBeats() << ".."
-                  << editBeatRange.getEnd().inBeats();
-            TRACKTION_LOG (trace);
-        }
-
         if (! splitStatus.range1.isEmpty())
         {
             // If we've just started playing, we need to check if we should have actually stopped and just cancel if so
