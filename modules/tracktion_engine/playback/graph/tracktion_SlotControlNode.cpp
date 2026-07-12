@@ -159,6 +159,30 @@ void SlotControlNode::process (ProcessContext& pc)
 
         auto splitStatus = launchHandle->advance (syncRange);
 
+        const bool naturalLoop = splitStatus.isSplit
+                              && splitStatus.playing1 && splitStatus.playing2
+                              && ! splitStatus.retriggered;
+
+        if (naturalLoop || splitStatus.retriggered)
+        {
+            juce::String trace;
+            trace << "[StretchTrace][SlotControl] event="
+                  << (splitStatus.retriggered ? "retrigger" : "natural-loop")
+                  << " handle=0x"
+                  << juce::String::toHexString (reinterpret_cast<juce::pointer_sized_int> (launchHandle.get()))
+                  << " node=" << getNodeProperties().nodeID
+                  << " split=" << static_cast<int> (splitStatus.isSplit)
+                  << " playing=" << static_cast<int> (splitStatus.playing1) << ","
+                  << static_cast<int> (splitStatus.playing2)
+                  << " range1=" << splitStatus.range1.getStart().inBeats() << ".."
+                  << splitStatus.range1.getEnd().inBeats() << " range2="
+                  << splitStatus.range2.getStart().inBeats() << ".."
+                  << splitStatus.range2.getEnd().inBeats()
+                  << " edit=" << editBeatRange.getStart().inBeats() << ".."
+                  << editBeatRange.getEnd().inBeats();
+            TRACKTION_LOG (trace);
+        }
+
         if (! splitStatus.range1.isEmpty())
         {
             // If we've just started playing, we need to check if we should have actually stopped and just cancel if so
@@ -193,7 +217,7 @@ void SlotControlNode::processSplitSection (ProcessContext& pc, LaunchHandle::Spl
     const juce::NormalisableRange blockRangeBeats (totalRange.getStart().inBeats(),
                                                    totalRange.getEnd().inBeats());
 
-    auto processSubSection = [this, &pc, &blockRangeBeats, editBeatRange = getEditBeatRange(), editTimeRange = getEditTimeRange()] (auto section, bool isPlaying, auto playStartTime)
+    auto processSubSection = [this, &pc, &blockRangeBeats, editBeatRange = getEditBeatRange(), editTimeRange = getEditTimeRange()] (auto section, bool isPlaying, auto playStartTime, bool retriggered)
     {
         const auto proportion = juce::Range (blockRangeBeats.convertTo0to1 (section.getStart().inBeats()),
                                              blockRangeBeats.convertTo0to1 (section.getEnd().inBeats()));
@@ -221,22 +245,23 @@ void SlotControlNode::processSplitSection (ProcessContext& pc, LaunchHandle::Spl
         const auto endBeat    = editBeatRange.getStart() + editBeatRange.getLength() * proportion.getEnd();
         const auto startTime  = editTimeRange.getStart() + editTimeRange.getLength() * proportion.getStart();
         const auto endTime    = editTimeRange.getStart() + editTimeRange.getLength() * proportion.getEnd();
-        processSection (subSection, { startBeat, endBeat }, { startTime, endTime }, section, isPlaying, playStartTime);
+        processSection (subSection, { startBeat, endBeat }, { startTime, endTime }, section,
+                        isPlaying, playStartTime, retriggered);
     };
 
     if (status.isSplit)
     {
-        processSubSection (status.range1, status.playing1, status.playStartTime1);
-        processSubSection (status.range2, status.playing2, status.playStartTime2);
+        processSubSection (status.range1, status.playing1, status.playStartTime1, false);
+        processSubSection (status.range2, status.playing2, status.playStartTime2, status.retriggered);
     }
     else
     {
-        processSubSection (status.range1, status.playing1, status.playStartTime1);
+        processSubSection (status.range1, status.playing1, status.playStartTime1, status.retriggered);
     }
 }
 
 void SlotControlNode::processSection (ProcessContext& pc, BeatRange editBeatRange, TimeRange editTimeRange, BeatRange unloopedClipBeatRange,
-                                      bool isPlaying, std::optional<BeatPosition> playStartTime)
+                                      bool isPlaying, std::optional<BeatPosition> playStartTime, bool retriggered)
 {
     const juce::ScopeGuard scope { [this, isPlaying]
                                    {
@@ -254,12 +279,14 @@ void SlotControlNode::processSection (ProcessContext& pc, BeatRange editBeatRang
 
         return;
     }
-    else if (! wasPlaying)
+    else if (! wasPlaying || retriggered)
     {
         // Force the playheadJumped state to true in order to resync MIDI streams etc.
         localPlayheadState.playheadJumped = true;
 
-        // Set this flag to avoid fading in
+        // A launch/retrigger starts at an intentional clip boundary. Suppress
+        // WaveNode's generic seek crossfade so the first transient is not
+        // softened; playheadJumped still resets the reader on a retrigger.
         localPlayheadState.firstBlockOfLoop = true;
     }
 

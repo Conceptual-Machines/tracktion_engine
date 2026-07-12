@@ -613,6 +613,184 @@ private:
 #endif
 
 //==============================================================================
+#if TRACKTION_ENABLE_TIMESTRETCH_SIGNALSMITH
+
+struct SignalsmithStretcher final : public TimeStretcher::Stretcher
+{
+    SignalsmithStretcher (double sourceSampleRate, int samplesPerBlock,
+                          int channels, bool realtime)
+        : numChannels (channels), samplesPerOutputBuffer (samplesPerBlock)
+    {
+        CRASH_TRACER
+        jassert (sourceSampleRate > 0.0);
+        jassert (numChannels > 0);
+        jassert (samplesPerOutputBuffer > 0);
+
+        stretch.presetDefault (numChannels, static_cast<float> (sourceSampleRate), realtime);
+        stretch.setFormantBase (static_cast<float> (200.0 / sourceSampleRate));
+        inputPointers.resize (static_cast<size_t> (numChannels));
+
+        maximumFlushSamples = juce::roundToInt (std::ceil (stretch.inputLatency() * maximumSpeedRatio
+                                                            + stretch.outputLatency())) + 1;
+        flushBuffer.setSize (numChannels, maximumFlushSamples);
+    }
+
+    bool isOk() const override { return numChannels > 0 && samplesPerOutputBuffer > 0; }
+
+    void reset() override
+    {
+        stretch.reset();
+        mappedInputPosition = 0.0;
+        mappedInputFrames = 0;
+        expectedOutputSamples = 0.0;
+        outputSamplesProduced = 0;
+        hasAlignedStart = false;
+        flushPrepared = false;
+        flushReadPosition = 0;
+        flushSamplesAvailable = 0;
+    }
+
+    bool setSpeedAndPitch (float newSpeedRatio, float semitonesUp) override
+    {
+        if (! std::isfinite (newSpeedRatio) || ! std::isfinite (semitonesUp))
+            return false;
+
+        speedRatio = juce::jlimit (minimumSpeedRatio, maximumSpeedRatio, newSpeedRatio);
+        stretch.setTransposeSemitones (semitonesUp);
+
+        // A neutral formant shift with pitch compensation preserves the source
+        // envelope while the spectrum is transposed.
+        stretch.setFormantFactor (1.0f, true);
+        return true;
+    }
+
+    int getFramesNeeded() const override
+    {
+        if (flushPrepared)
+            return 0;
+
+        const auto nextMappedPosition = mappedInputPosition
+                                      + static_cast<double> (samplesPerOutputBuffer) / speedRatio;
+        const auto nextMappedFrame = static_cast<int64_t> (std::llround (nextMappedPosition));
+        const auto mappedFramesNeeded = std::max<int64_t> (1, nextMappedFrame - mappedInputFrames);
+        return static_cast<int> (mappedFramesNeeded) + (hasAlignedStart ? 0 : getSeekSamples());
+    }
+
+    int getMaxFramesNeeded() const override
+    {
+        return juce::roundToInt (std::ceil (stretch.outputSeekLength (1.0f / minimumSpeedRatio)
+                                            + samplesPerOutputBuffer / minimumSpeedRatio)) + 1;
+    }
+
+    int processData (const float* const* inChannels, int numSamples,
+                     float* const* outChannels) override
+    {
+        CRASH_TRACER
+        jassert (! flushPrepared);
+        jassert (numSamples <= getFramesNeeded());
+
+        const auto framesRequested = getFramesNeeded();
+        int inputOffset = 0;
+
+        if (! hasAlignedStart)
+        {
+            const auto seekSamples = getSeekSamples();
+
+            if (numSamples >= seekSamples)
+            {
+                stretch.outputSeek (inChannels, seekSamples);
+                inputOffset = seekSamples;
+            }
+
+            // Very short final buffers cannot provide Signalsmith's preferred
+            // seek pre-roll. Process them normally rather than dropping audio.
+            hasAlignedStart = true;
+        }
+
+        const auto mappedSamples = numSamples - inputOffset;
+        const auto outputSamples = numSamples == framesRequested
+                                     ? samplesPerOutputBuffer
+                                     : std::min (samplesPerOutputBuffer,
+                                                 juce::roundToInt (mappedSamples * speedRatio));
+
+        expectedOutputSamples += static_cast<double> (numSamples) * speedRatio;
+
+        if (outputSamples <= 0)
+            return 0;
+
+        for (int channel = 0; channel < numChannels; ++channel)
+            inputPointers[static_cast<size_t> (channel)] = inChannels[channel] + inputOffset;
+
+        stretch.process (inputPointers.data(), mappedSamples, outChannels, outputSamples);
+
+        mappedInputFrames += mappedSamples;
+        mappedInputPosition += static_cast<double> (outputSamples) / speedRatio;
+        outputSamplesProduced += outputSamples;
+        return outputSamples;
+    }
+
+    int flush (float* const* outChannels) override
+    {
+        CRASH_TRACER
+
+        if (! flushPrepared)
+        {
+            const auto remaining = std::clamp<int64_t> (
+                static_cast<int64_t> (std::llround (expectedOutputSamples)) - outputSamplesProduced,
+                0, maximumFlushSamples);
+
+            flushSamplesAvailable = static_cast<int> (remaining);
+            if (flushSamplesAvailable > 0)
+                stretch.flush (flushBuffer.getArrayOfWritePointers(), flushSamplesAvailable,
+                               1.0f / speedRatio);
+
+            flushPrepared = true;
+        }
+
+        const auto numToCopy = std::min (samplesPerOutputBuffer,
+                                         flushSamplesAvailable - flushReadPosition);
+        if (numToCopy <= 0)
+            return 0;
+
+        for (int channel = 0; channel < numChannels; ++channel)
+            juce::FloatVectorOperations::copy (outChannels[channel],
+                                               flushBuffer.getReadPointer (channel, flushReadPosition),
+                                               numToCopy);
+
+        flushReadPosition += numToCopy;
+        return numToCopy;
+    }
+
+private:
+    static constexpr float minimumSpeedRatio = 0.1f;
+    static constexpr float maximumSpeedRatio = 10.0f;
+
+    int getSeekSamples() const
+    {
+        return juce::roundToInt (std::ceil (stretch.outputSeekLength (1.0f / speedRatio)));
+    }
+
+    ::signalsmith::stretch::SignalsmithStretch<float> stretch;
+    std::vector<const float*> inputPointers;
+    juce::AudioBuffer<float> flushBuffer;
+    int numChannels = 0;
+    int samplesPerOutputBuffer = 0;
+    int maximumFlushSamples = 0;
+    int64_t mappedInputFrames = 0;
+    int64_t outputSamplesProduced = 0;
+    double mappedInputPosition = 0.0;
+    double expectedOutputSamples = 0.0;
+    float speedRatio = 1.0f;
+    bool hasAlignedStart = false;
+    bool flushPrepared = false;
+    int flushReadPosition = 0;
+    int flushSamplesAvailable = 0;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SignalsmithStretcher)
+};
+#endif
+
+//==============================================================================
 #if TRACKTION_ENABLE_TIMESTRETCH_RUBBERBAND
 
 #ifdef __GNUC__
@@ -830,6 +1008,7 @@ static juce::String getElastiqueMobile()            { return "Elastique (" + TRA
 static juce::String getElastiqueMono()              { return "Elastique (" + TRANS("Monophonic") + ")"; }
 static juce::String getSoundTouchNormal()           { return "SoundTouch (" + TRANS("Normal") + ")"; }
 static juce::String getSoundTouchBetter()           { return "SoundTouch (" + TRANS("Better") + ")"; }
+static juce::String getSignalsmith()                 { return "Signalsmith Stretch"; }
 static juce::String getRubberBandMelodic()          { return "RubberBand (" + TRANS("Melodic") + ")"; }
 static juce::String getRubberBandPercussive()       { return "RubberBand (" + TRANS("Percussive") + ")"; }
 static juce::String getElastiqueDirectPro()         { return "Elastique Direct (" + TRANS("Pro") + ")"; }
@@ -859,7 +1038,14 @@ TimeStretcher::Mode TimeStretcher::checkModeIsAvailable (Mode m)
         case rubberbandMelodic:
         case rubberbandPercussive:
        #endif
+       #if ! TRACKTION_ENABLE_TIMESTRETCH_SIGNALSMITH
+        case signalsmith:
+       #endif
             return defaultMode;
+       #if TRACKTION_ENABLE_TIMESTRETCH_SIGNALSMITH
+        case signalsmith:
+            return m;
+       #endif
        #if TRACKTION_ENABLE_TIMESTRETCH_SOUNDTOUCH
         case soundtouchNormal:
         case soundtouchBetter:
@@ -890,6 +1076,10 @@ TimeStretcher::Mode TimeStretcher::checkModeIsAvailable (Mode m)
 juce::StringArray TimeStretcher::getPossibleModes (Engine& e, bool excludeMelodyne)
 {
     juce::StringArray s;
+
+   #if TRACKTION_ENABLE_TIMESTRETCH_SIGNALSMITH
+    s.add (getSignalsmith());
+   #endif
 
    #if TRACKTION_ENABLE_TIMESTRETCH_ELASTIQUE
     s.add (getElastiquePro());
@@ -923,6 +1113,10 @@ juce::StringArray TimeStretcher::getPossibleModes (Engine& e, bool excludeMelody
 
 TimeStretcher::Mode TimeStretcher::getModeFromName (Engine& e, const juce::String& name)
 {
+   #if TRACKTION_ENABLE_TIMESTRETCH_SIGNALSMITH
+    if (name == getSignalsmith())                return signalsmith;
+   #endif
+
    #if TRACKTION_ENABLE_TIMESTRETCH_ELASTIQUE
     if (name == getElastiquePro())              return elastiquePro;
     if (name == getElastiqueEfficeint())        return elastiqueEfficient;
@@ -955,6 +1149,7 @@ juce::String TimeStretcher::getNameOfMode (const Mode mode)
 {
     switch (mode)
     {
+        case signalsmith:               return getSignalsmith();
         case elastiquePro:              return getElastiquePro();
         case elastiqueEfficient:        return getElastiqueEfficeint();
         case elastiqueMobile:           return getElastiqueMobile();
@@ -1002,9 +1197,20 @@ void TimeStretcher::initialise (double sourceSampleRate, int samplesPerBlock,
     CRASH_TRACER
     jassert (stretcher == nullptr);
 
-   #if TRACKTION_ENABLE_TIMESTRETCH_ELASTIQUE || TRACKTION_ENABLE_TIMESTRETCH_RUBBERBAND || TRACKTION_ENABLE_TIMESTRETCH_SOUNDTOUCH
+   #if TRACKTION_ENABLE_TIMESTRETCH_ELASTIQUE || TRACKTION_ENABLE_TIMESTRETCH_RUBBERBAND || TRACKTION_ENABLE_TIMESTRETCH_SOUNDTOUCH || TRACKTION_ENABLE_TIMESTRETCH_SIGNALSMITH
     switch (mode)
     {
+       #if TRACKTION_ENABLE_TIMESTRETCH_SIGNALSMITH
+        case signalsmith:
+            juce::ignoreUnused (options);
+            stretcher = std::make_unique<SignalsmithStretcher> (sourceSampleRate, samplesPerBlock,
+                                                                numChannels, realtime);
+            break;
+       #else
+        case signalsmith:
+            break;
+       #endif
+
        #if TRACKTION_ENABLE_TIMESTRETCH_ELASTIQUE
         case elastiquePro:
         case elastiqueEfficient:

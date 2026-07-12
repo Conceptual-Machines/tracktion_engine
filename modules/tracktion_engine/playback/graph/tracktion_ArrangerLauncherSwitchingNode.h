@@ -149,6 +149,7 @@ private:
     std::shared_ptr<ActiveNoteList> arrangerActiveNoteList;
     std::shared_ptr<std::atomic<ArrangerLauncherSwitchingNode*>> activeNode;
     MPESourceID midiSourceID = createUniqueMPESourceID();
+    int lastTraceState = -1;
     ScopedListener playSlotsUpdaterListener { track->edit.engine.getBackToArrangerUpdateTimer(),  *this };
 
     //==============================================================================

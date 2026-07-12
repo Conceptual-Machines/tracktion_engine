@@ -158,7 +158,30 @@ void ArrangerLauncherSwitchingNode::process (ProcessContext& pc)
 
     processLauncher (pc, slotStatus);
 
-    if (playArranger)
+    // A playing launcher is authoritative even if the message-thread
+    // playSlotClips property has not caught up yet. Mixing the arranger here
+    // doubles identical clips and produces comb-filtered attacks/fades at
+    // their independently processed loop boundaries.
+    const bool processArrangerAudio = playArranger && ! slotStatus.anyClipsPlaying;
+
+    const int traceState = (slotStatus.anyClipsPlaying ? 1 : 0)
+                         | (slotStatus.anyClipsQueued ? 2 : 0)
+                         | (track->playSlotClips.get() ? 4 : 0)
+                         | (processArrangerAudio ? 8 : 0);
+
+    if (traceState != lastTraceState)
+    {
+        lastTraceState = traceState;
+        juce::String trace;
+        trace << "[StretchTrace][ArrangerLauncher] track=" << track->itemID.toString()
+              << " slotPlaying=" << static_cast<int> (slotStatus.anyClipsPlaying)
+              << " slotQueued=" << static_cast<int> (slotStatus.anyClipsQueued)
+              << " playSlotClips=" << static_cast<int> (track->playSlotClips.get())
+              << " mixArranger=" << static_cast<int> (processArrangerAudio);
+        TRACKTION_LOG (trace);
+    }
+
+    if (processArrangerAudio)
         processArranger (pc, slotStatus);
 }
 

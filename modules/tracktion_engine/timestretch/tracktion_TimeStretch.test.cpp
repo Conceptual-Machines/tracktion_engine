@@ -26,6 +26,14 @@ public:
 
     void runTest() override
     {
+       #if TRACKTION_ENABLE_TIMESTRETCH_SIGNALSMITH
+        {
+            const auto mode = tracktion::engine::TimeStretcher::signalsmith;
+            runPitchShiftTest (mode);
+            runTimestretchTest (mode);
+        }
+       #endif
+
        #if TRACKTION_ENABLE_TIMESTRETCH_SOUNDTOUCH
         {
             const auto mode = tracktion::engine::TimeStretcher::soundtouchBetter;
@@ -115,7 +123,8 @@ private:
                                                  mode == tracktion::engine::TimeStretcher::elastiquePro
                                                  || mode == tracktion::engine::TimeStretcher::elastiqueDirectPro
                                                  || mode == tracktion::engine::TimeStretcher::rubberbandMelodic
-                                                 || mode == tracktion::engine::TimeStretcher::rubberbandPercussive);
+                                                 || mode == tracktion::engine::TimeStretcher::rubberbandPercussive
+                                                 || mode == tracktion::engine::TimeStretcher::signalsmith);
 
        #if TIMESTRETCHER_WRITE_WRITE_TEST_FILES
         writeToFile (juce::File::getSpecialLocation (juce::File::userDesktopDirectory).getChildFile ("original.wav"), sourceBuffer, sampleRate);

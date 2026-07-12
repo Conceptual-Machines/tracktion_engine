@@ -12,6 +12,10 @@
 
 #include "tracktion_engine.h"
 
+#if TRACKTION_ENABLE_TIMESTRETCH_SIGNALSMITH
+ #include "3rd_party/signalsmith/signalsmith-stretch.h"
+#endif
+
 #if TRACKTION_ENABLE_TIMESTRETCH_ELASTIQUE
  #ifdef __GNUC__
   #pragma GCC diagnostic push

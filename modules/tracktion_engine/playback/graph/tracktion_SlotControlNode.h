@@ -63,7 +63,7 @@ private:
 
     void processSplitSection (ProcessContext&, LaunchHandle::SplitStatus);
     void processSection (ProcessContext&, BeatRange editBeatRange, TimeRange editTimeRange, BeatRange clipBeatRange,
-                         bool isPlaying, std::optional<BeatPosition> playStartTime);
+                         bool isPlaying, std::optional<BeatPosition> playStartTime, bool retriggered);
     void processStop (ProcessContext&, double timestampForMidiNoteOffs);
 };
 
