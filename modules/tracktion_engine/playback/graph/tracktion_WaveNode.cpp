@@ -2213,6 +2213,14 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
         return loopSectionTime;
     }();
 
+    // An identity warp map is a no-op. Avoid an unnecessary second
+    // phase-vocoder stage, which also softens the first transient.
+    if (warpMap && std::all_of (warpMap->begin(), warpMap->end(), [] (const WarpPoint& point)
+        {
+            return std::abs ((point.sourceTime - point.warpTime).inSeconds()) < 1.0e-9;
+        }))
+        warpMap.reset();
+
     if (warpMap)
     {
         // If we're using a warp map, the looping as to be applied above the warp so the loop times don't get warped
