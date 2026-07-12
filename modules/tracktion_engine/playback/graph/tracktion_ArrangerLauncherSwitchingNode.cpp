@@ -158,13 +158,7 @@ void ArrangerLauncherSwitchingNode::process (ProcessContext& pc)
 
     processLauncher (pc, slotStatus);
 
-    // A playing launcher is authoritative even if the message-thread
-    // playSlotClips property has not caught up yet. Mixing the arranger here
-    // doubles identical clips and produces comb-filtered attacks/fades at
-    // their independently processed loop boundaries.
-    const bool processArrangerAudio = playArranger && ! slotStatus.anyClipsPlaying;
-
-    if (processArrangerAudio)
+    if (playArranger)
         processArranger (pc, slotStatus);
 }
 

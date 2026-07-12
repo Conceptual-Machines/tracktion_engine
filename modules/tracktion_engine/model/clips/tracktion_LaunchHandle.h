@@ -82,7 +82,6 @@ public:
         BeatRange range1, range2;
 
         bool isSplit = false;
-        bool retriggered = false;
         std::optional<BeatPosition> playStartTime1, playStartTime2;
     };
 

@@ -193,7 +193,7 @@ void SlotControlNode::processSplitSection (ProcessContext& pc, LaunchHandle::Spl
     const juce::NormalisableRange blockRangeBeats (totalRange.getStart().inBeats(),
                                                    totalRange.getEnd().inBeats());
 
-    auto processSubSection = [this, &pc, &blockRangeBeats, editBeatRange = getEditBeatRange(), editTimeRange = getEditTimeRange()] (auto section, bool isPlaying, auto playStartTime, bool retriggered)
+    auto processSubSection = [this, &pc, &blockRangeBeats, editBeatRange = getEditBeatRange(), editTimeRange = getEditTimeRange()] (auto section, bool isPlaying, auto playStartTime)
     {
         const auto proportion = juce::Range (blockRangeBeats.convertTo0to1 (section.getStart().inBeats()),
                                              blockRangeBeats.convertTo0to1 (section.getEnd().inBeats()));
@@ -221,23 +221,22 @@ void SlotControlNode::processSplitSection (ProcessContext& pc, LaunchHandle::Spl
         const auto endBeat    = editBeatRange.getStart() + editBeatRange.getLength() * proportion.getEnd();
         const auto startTime  = editTimeRange.getStart() + editTimeRange.getLength() * proportion.getStart();
         const auto endTime    = editTimeRange.getStart() + editTimeRange.getLength() * proportion.getEnd();
-        processSection (subSection, { startBeat, endBeat }, { startTime, endTime }, section,
-                        isPlaying, playStartTime, retriggered);
+        processSection (subSection, { startBeat, endBeat }, { startTime, endTime }, section, isPlaying, playStartTime);
     };
 
     if (status.isSplit)
     {
-        processSubSection (status.range1, status.playing1, status.playStartTime1, false);
-        processSubSection (status.range2, status.playing2, status.playStartTime2, status.retriggered);
+        processSubSection (status.range1, status.playing1, status.playStartTime1);
+        processSubSection (status.range2, status.playing2, status.playStartTime2);
     }
     else
     {
-        processSubSection (status.range1, status.playing1, status.playStartTime1, status.retriggered);
+        processSubSection (status.range1, status.playing1, status.playStartTime1);
     }
 }
 
 void SlotControlNode::processSection (ProcessContext& pc, BeatRange editBeatRange, TimeRange editTimeRange, BeatRange unloopedClipBeatRange,
-                                      bool isPlaying, std::optional<BeatPosition> playStartTime, bool retriggered)
+                                      bool isPlaying, std::optional<BeatPosition> playStartTime)
 {
     const juce::ScopeGuard scope { [this, isPlaying]
                                    {
@@ -255,14 +254,12 @@ void SlotControlNode::processSection (ProcessContext& pc, BeatRange editBeatRang
 
         return;
     }
-    else if (! wasPlaying || retriggered)
+    else if (! wasPlaying)
     {
         // Force the playheadJumped state to true in order to resync MIDI streams etc.
         localPlayheadState.playheadJumped = true;
 
-        // A launch/retrigger starts at an intentional clip boundary. Suppress
-        // WaveNode's generic seek crossfade so the first transient is not
-        // softened; playheadJumped still resets the reader on a retrigger.
+        // Set this flag to avoid fading in
         localPlayheadState.firstBlockOfLoop = true;
     }
 

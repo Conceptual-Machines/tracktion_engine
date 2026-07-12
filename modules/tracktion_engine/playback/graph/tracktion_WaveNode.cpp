@@ -656,7 +656,6 @@ public:
     virtual ~TimeStretchReaderBase() = default;
     virtual void setSpeed (double speedRatio) = 0;
     virtual void setPitch (double semitones) = 0;
-    virtual void setLoopPosition (SampleCount t) { setPosition (t); }
 };
 
 class TimeStretchReader final   : public TimeStretchReaderBase
@@ -664,23 +663,19 @@ class TimeStretchReader final   : public TimeStretchReaderBase
 public:
     TimeStretchReader (std::unique_ptr<AudioReader> input,
                        TimeStretcher::Mode mode,
-                       TimeStretcher::ElastiqueProOptions elastiqueProOptions,
-                       bool circularLoopInput = false)
+                       TimeStretcher::ElastiqueProOptions elastiqueProOptions)
         : TimeStretchReaderBase (std::move (input)), numChannels ((int) source->getNumChannels())
     {
         timeStretcher.initialise (source->getSampleRate(), chunkSize, numChannels,
                                   mode, elastiqueProOptions, true);
         inputFifo.setSize (numChannels, timeStretcher.getMaxFramesNeeded());
         outputFifo.setSize (numChannels, timeStretcher.getMaxFramesNeeded());
-        canLoopContinuously = circularLoopInput;
-        primeLoopStarts = circularLoopInput && mode == TimeStretcher::signalsmith;
 
         source->setPosition (getReadPosition());
         timeStretcher.reset();
         setSpeedAndPitch (playbackSpeedRatio, semitonesShift);
         inputFifo.reset();
         outputFifo.reset();
-        needsLoopPrime = primeLoopStarts;
     }
 
     SampleCount getPosition() override
@@ -700,24 +695,11 @@ public:
         setSpeedAndPitch (playbackSpeedRatio, semitonesShift);
         inputFifo.reset();
         outputFifo.reset();
-        needsLoopPrime = primeLoopStarts;
     }
 
     void setPosition (TimePosition t) override
     {
         setPosition (toSamples (t, getSampleRate()));
-    }
-
-    void setLoopPosition (SampleCount t) override
-    {
-        // Supported stretchers are fed a circular source stream, so their input
-        // and output FIFOs already contain the loop head when the musical position wraps.
-        // Only rebase the logical position; resetting either FIFO would insert
-        // the algorithm's analysis latency into every cycle.
-        if (canLoopContinuously)
-            readPosition = (double) t;
-        else
-            setPosition (t);
     }
 
     void reset() override
@@ -754,10 +736,6 @@ public:
     bool readSamples (choc::buffer::ChannelArrayView<float>& destBuffer) override
     {
         assert (numChannels == (int) destBuffer.getNumChannels());
-
-        if (std::exchange (needsLoopPrime, false))
-            primeLoopContext();
-
         const auto numFramesToDo = destBuffer.getNumFrames();
 
         for (;;)
@@ -802,49 +780,10 @@ public:
     TimeStretcher timeStretcher;
     AudioFifo inputFifo { numChannels, chunkSize }, outputFifo { numChannels, chunkSize };
     double playbackSpeedRatio = 1.0, semitonesShift = 0.0, readPosition = 0.0;
-    bool canLoopContinuously = false;
-    bool primeLoopStarts = false;
-    bool needsLoopPrime = false;
 
     SampleCount getReadPosition() const
     {
         return static_cast<SampleCount> (readPosition + 0.5);
-    }
-
-    void primeLoopContext()
-    {
-        // Make the first audible loop head behave like a later cycle. Run one
-        // complete Signalsmith analysis window from the circular source into a
-        // throwaway buffer, ending at the requested start position. No samples
-        // are inserted into the timeline; this only warms the analysis state.
-        const auto targetPosition = readPosition;
-        const auto sampleRate = getSampleRate();
-        const auto nominalWarmupFrames = juce::roundToInt (sampleRate * 0.12);
-        const auto warmupFrames = ((nominalWarmupFrames + chunkSize - 1) / chunkSize) * chunkSize;
-        const auto warmupSourceFrames = warmupFrames * playbackSpeedRatio;
-
-        readPosition = targetPosition - warmupSourceFrames;
-        source->setPosition (getReadPosition());
-        timeStretcher.reset();
-        setSpeedAndPitch (playbackSpeedRatio, semitonesShift);
-        inputFifo.reset();
-        outputFifo.reset();
-
-        AudioScratchBuffer discardBuffer (numChannels, warmupFrames);
-        auto discardView = toBufferView (discardBuffer.buffer);
-
-        if (! readSamples (discardView))
-        {
-            readPosition = targetPosition;
-            source->setPosition (getReadPosition());
-            timeStretcher.reset();
-            setSpeedAndPitch (playbackSpeedRatio, semitonesShift);
-            inputFifo.reset();
-            outputFifo.reset();
-            return;
-        }
-
-        readPosition = targetPosition;
     }
 };
 
@@ -1188,8 +1127,7 @@ public:
                choc::buffer::ChannelArrayView<float>& destBuffer,
                TimeDuration editDuration,
                bool isContiguous,
-               double playbackSpeedRatio,
-               bool isLoopWrap = false)
+               double playbackSpeedRatio)
     {
         const auto numSourceSamples = toSamples (tr.getLength(), getSampleRate());
 
@@ -1206,10 +1144,7 @@ public:
         else
             resamplerReader->setSpeedRatio (blockSpeedRatio);
 
-        if (isLoopWrap && timeStretchSource != nullptr)
-            timeStretchSource->setLoopPosition (toSamples (tr.getStart(), getSampleRate()));
-        else
-            setPosition (tr.getStart());
+        setPosition (tr.getStart());
 
         if (! isContiguous)
             reset();
@@ -1345,8 +1280,6 @@ private:
     const BeatDuration offset;
     std::shared_ptr<BeatDuration> dynamicOffset;
     tempo::Sequence::Position sourceSequencePosition;
-    std::optional<BeatPosition> previousLoopPosition;
-    bool loopWrapPending = false;
 
     // Maps a linear beat position (already adjusted for offset/dynamicOffset)
     // back to the proportion (0..1) it represents within `linearRange`.
@@ -1370,23 +1303,14 @@ private:
 
         const auto s = linearPositionToLoopPosition (br.getStart(), loopRange);
         const auto e = linearPositionToLoopPosition (br.getEnd(), loopRange);
-        const auto previousPosition = previousLoopPosition;
-        const bool pendingWrap = std::exchange (loopWrapPending, false);
-        const bool wrappedAtStart = isContiguous
-                                 && (pendingWrap
-                                     || (previousPosition.has_value()
-                                         && (s - *previousPosition).inBeats() < -1.0e-7));
-        previousLoopPosition = e;
 
         if (s > e)
         {
             if (s >= loopRange.getEnd())
-                return readBeatRange ({ loopRange.getStart(), e }, destBuffer, editDuration,
-                                      isContiguous, playbackSpeedRatio, isContiguous);
+                return readBeatRange ({ loopRange.getStart(), e }, destBuffer, editDuration, isContiguous, playbackSpeedRatio);
 
             if (e <= loopRange.getStart())
-                return readBeatRange ({ s, loopRange.getEnd() }, destBuffer, editDuration,
-                                      isContiguous, playbackSpeedRatio, wrappedAtStart);
+                return readBeatRange ({ s, loopRange.getEnd() }, destBuffer, editDuration, isContiguous, playbackSpeedRatio);
 
             // Otherwise range is split
             const BeatRange br1 (s, loopRange.getEnd());
@@ -1397,36 +1321,21 @@ private:
             const auto numFrames = destBuffer.getNumFrames();
             const auto numFrames1 = static_cast<FrameCount> (std::llround (numFrames * prop1));
 
-            // A boundary can fall less than half an output sample after the
-            // end of this section. In that case buffer2 is empty, so no reader
-            // receives the loop-wrap flag. Carry it into the next section
-            // instead of letting that section look like an ordinary seek.
-            if (numFrames1 >= numFrames)
-            {
-                loopWrapPending = isContiguous;
-                return readBeatRange (br1, destBuffer, editDuration, isContiguous,
-                                      playbackSpeedRatio, wrappedAtStart);
-            }
-
             auto buffer1 = destBuffer.getStart (numFrames1);
             auto buffer2 = destBuffer.getFrameRange ({ numFrames1, numFrames });
 
-            return readBeatRange (br1, buffer1, editDuration * prop1, isContiguous,
-                                  playbackSpeedRatio, wrappedAtStart)
-                && readBeatRange (br2, buffer2, editDuration * prop2, false,
-                                  playbackSpeedRatio, isContiguous);
+            return readBeatRange (br1, buffer1, editDuration * prop1, isContiguous, playbackSpeedRatio)
+                && readBeatRange (br2, buffer2, editDuration * prop2, false, playbackSpeedRatio);
         }
 
-        return readBeatRange ({ s, e }, destBuffer, editDuration, isContiguous,
-                              playbackSpeedRatio, wrappedAtStart);
+        return readBeatRange ({ s, e }, destBuffer, editDuration, isContiguous, playbackSpeedRatio);
     }
 
     bool readBeatRange (BeatRange br,
                         choc::buffer::ChannelArrayView<float>& destBuffer,
                         TimeDuration editDuration,
                         bool isContiguous,
-                        double playbackSpeedRatio,
-                        bool isLoopWrap = false)
+                        double playbackSpeedRatio)
     {
         // Convert source beat range to source time range
         sourceSequencePosition.set (br.getStart());
@@ -1434,8 +1343,7 @@ private:
         sourceSequencePosition.set (br.getEnd());
         const auto endTime = (sourceSequencePosition.getTime());
 
-        return source->read ({ startTime, endTime }, destBuffer, editDuration,
-                             isContiguous, playbackSpeedRatio, isLoopWrap);
+        return source->read ({ startTime, endTime }, destBuffer, editDuration, isContiguous, playbackSpeedRatio);
     }
 
     static inline BeatPosition linearPositionToLoopPosition (BeatPosition position, BeatRange loopRange)
@@ -2282,19 +2190,12 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
                                                                         destChannels, channelsToUse);
     std::unique_ptr<AudioReader> loopReader;
 
-    // Signalsmith and SoundTouch see the loop as a circular stream: while they analyse the tail, their input is
-    // already continuing from the head. BeatRangeReader then rebases only the logical read position at the wrap,
-    // leaving the stretcher and its FIFOs continuous. Other stretchers retain the gated source/reset behaviour
-    // which prevents their FFT windows pulling a wrapped transient into the loop tail (TE #8).
+    // In autoTempo (syncTempo / syncPitch) the upstream BeatRangeReader splits reads at the loop boundary and
+    // calls setPosition into each cycle, so the looping reader can gate past loopEnd to silence — this prevents
+    // the time-stretcher's FFT analysis window from pulling wrapped samples (which sound like an audible bleed
+    // of the post-loop transient — TE #8). Time-based playback does not split, so it still needs wrap.
     const bool isAutoTempo = (syncTempo == SyncTempo::yes || syncPitch == SyncPitch::yes);
-    const bool stretcherSupportsCircularInput = timeStretcherMode == TimeStretcher::signalsmith
-                                             || timeStretcherMode == TimeStretcher::soundtouchNormal
-                                             || timeStretcherMode == TimeStretcher::soundtouchBetter;
-    const bool useCircularStretcherInput = isAutoTempo
-                                        && stretcherSupportsCircularInput;
-    const auto loopMode = isAutoTempo && ! useCircularStretcherInput
-                            ? LoopReader::Mode::gate
-                            : LoopReader::Mode::wrap;
+    const auto loopMode = isAutoTempo ? LoopReader::Mode::gate : LoopReader::Mode::wrap;
 
     // For autoTempo, the loop range lives in loopSectionBeats — convert to a file-time range
     // via the file tempo so the LoopReader (which works in source samples) knows loopEnd.
@@ -2312,11 +2213,8 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
         return loopSectionTime;
     }();
 
-    // Enabling warp creates boundary/transient markers at identical source and
-    // warp times. Such a map is a no-op, but constructing WarpReader for it
-    // would still put the signal through an additional phase-vocoder stage.
-    // Besides wasting CPU, two cold Signalsmith windows soften the very first
-    // transient. Engage WarpReader only after a marker actually changes time.
+    // An identity warp map is a no-op. Avoid an unnecessary second
+    // phase-vocoder stage, which also softens the first transient.
     if (warpMap && std::all_of (warpMap->begin(), warpMap->end(), [] (const WarpPoint& point)
         {
             return std::abs ((point.sourceTime - point.warpTime).inSeconds()) < 1.0e-9;
@@ -2356,15 +2254,12 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
     if (! timestretchDisabled)
     {
         if (readAhead == ReadAhead::no)
-            timeStretchReader = std::make_unique<TimeStretchReader> (std::move (resamplerAudioReader), timeStretcherMode,
-                                                                     elastiqueProOptions,
-                                                                     useCircularStretcherInput && ! loopRangeForReader.isEmpty());
+            timeStretchReader = std::make_unique<TimeStretchReader> (std::move (resamplerAudioReader), timeStretcherMode, elastiqueProOptions);
         else
             timeStretchReader = std::make_unique<ReadAheadTimeStretchReader> (std::move (resamplerAudioReader), timeStretcherMode, elastiqueProOptions, outputBlockSize);
     }
 
     auto timeStretcher = timeStretchReader.get();
-
     std::unique_ptr<TimeRangeReader> timeRangeReader;
     std::unique_ptr<EditReader> basicEditReader;
 

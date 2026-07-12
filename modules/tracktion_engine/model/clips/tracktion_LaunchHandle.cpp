@@ -246,8 +246,6 @@ auto LaunchHandle::advance (const SyncRange& syncRange) -> SplitStatus
                 {
                     if (queuedPosition->v <= blockMonotonicBeatRange.v.getStart())
                     {
-                        splitStatus.retriggered = playState == PlayState::playing;
-
                         // Try and sync from another state first
                         if (auto syncFrom = stateToSyncFrom.load())
                         {
@@ -286,8 +284,6 @@ auto LaunchHandle::advance (const SyncRange& syncRange) -> SplitStatus
                     }
                     else if (blockMonotonicBeatRange.v.contains (queuedPosition->v))
                     {
-                        splitStatus.retriggered = playState == PlayState::playing;
-
                         const auto firstSplitLength     = queuedPosition->v - blockMonotonicBeatRange.v.getStart();
                         const auto secondSplitLength    = blockMonotonicBeatRange.v.getEnd() - queuedPosition->v;
 
@@ -345,7 +341,6 @@ auto LaunchHandle::advance (const SyncRange& syncRange) -> SplitStatus
                 }
                 else
                 {
-                    splitStatus.retriggered = playState == PlayState::playing;
                     splitStatus.playing1        = true;
                     splitStatus.range1          = blockEditBeatRange;
                     splitStatus.playStartTime1  = blockEditBeatRange.getStart();

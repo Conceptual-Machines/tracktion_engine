@@ -30,7 +30,6 @@ public:
     {
         runBasicLauchHandleTests();
         runQuantisedLauchHandleTests();
-        runRetriggerTests();
         legatoLauchHandleTests();
     }
 
@@ -167,36 +166,6 @@ private:
                 expect (s.range2 == BeatRange (1.25_bp, 1.5_bp));
             }
         }
-    }
-
-    void runRetriggerTests()
-    {
-        beginTest ("Retriggering an already-playing handle is explicit");
-
-        LaunchHandle h;
-        SyncRange syncRange;
-        auto advanceHandle = [&h, &syncRange] (BeatDuration duration)
-        {
-            auto newEnd = syncRange.end;
-            newEnd.monotonicBeat.v = newEnd.monotonicBeat.v + duration;
-            newEnd.beat = newEnd.beat + duration;
-            syncRange = SyncRange { syncRange.end, newEnd };
-            return h.advance (syncRange);
-        };
-
-        h.play ({});
-        auto initialLaunch = advanceHandle (0.5_bd);
-        expect (! initialLaunch.retriggered);
-
-        auto continuousPlayback = advanceHandle (0.5_bd);
-        expect (! continuousPlayback.retriggered);
-
-        h.play ({});
-        auto retrigger = advanceHandle (0.5_bd);
-        expect (retrigger.retriggered);
-        expect (! retrigger.isSplit);
-        expect (retrigger.playing1);
-        expect (retrigger.playStartTime1 == 1_bp);
     }
 
     void legatoLauchHandleTests()
