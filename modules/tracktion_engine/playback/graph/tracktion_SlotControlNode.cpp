@@ -9,6 +9,7 @@
 */
 
 #include "../../model/clips/tracktion_LaunchHandle.h"
+#include "tracktion_LaunchDeClick.h"
 
 namespace tracktion { inline namespace engine
 {
@@ -311,24 +312,13 @@ void SlotControlNode::processSection (ProcessContext& pc, BeatRange editBeatRang
     copyIfNotAliased (pc.buffers.audio, sourceBuffers.audio);
     pc.buffers.midi.copyFrom (sourceBuffers.midi);
 
-    // Apply a fade-in when transitioning from stopped to playing.
-    // This prevents a click caused by the first audio sample being non-zero.
-    // Length is per-clip via AudioClipBase::launchFadeSamples (default 256
-    // samples ≈ 5.8ms @ 44.1kHz). 0 disables the fade (transient preservation).
+    // Remove the discontinuity when transitioning from silence to audio. A
+    // conventional gain fade attenuates the entire first attack, which is
+    // especially obvious after a phase-vocoder has spread the transient across
+    // the opening window. Subtracting only the decaying initial-sample offset
+    // de-clicks a non-zero boundary while leaving zero-crossing attacks intact.
     if (! wasPlaying && launchFadeSamples > 0)
-    {
-        const auto numChannels = pc.buffers.audio.size.numChannels;
-        const auto numFrames = pc.buffers.audio.size.numFrames;
-        const uint32_t fadeLength = std::min (numFrames, (uint32_t) launchFadeSamples);
-
-        for (choc::buffer::ChannelCount channel = 0; channel < numChannels; ++channel)
-        {
-            auto dest = pc.buffers.audio.getIterator (channel).sample;
-
-            for (uint32_t i = 0; i < fadeLength; ++i)
-                dest[i] *= (float) i / (float) fadeLength;
-        }
-    }
+        applyAudioStartDeClick (pc.buffers.audio, launchFadeSamples);
 
     // Update last samples
     if (lastSamples)

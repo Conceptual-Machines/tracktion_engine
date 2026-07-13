@@ -137,6 +137,11 @@ public:
     void prefetchBlock (juce::Range<int64_t> /*referenceSampleRange*/) override;
     void process (ProcessContext&) override;
 
+    /** True while a launcher should claim track playback from the arranger.
+        A still-playing handle with a queued stop must not reclaim the track
+        after Back to Arrangement has explicitly cleared playSlotClips. */
+    static bool shouldActivateSlotPlayback (const LaunchHandle&);
+
 private:
     //==============================================================================
     struct SlotClipStatus;
