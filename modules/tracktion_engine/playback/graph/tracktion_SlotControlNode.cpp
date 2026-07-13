@@ -294,7 +294,12 @@ void SlotControlNode::processSection (ProcessContext& pc, BeatRange editBeatRang
                 localPlayheadState.playheadJumped = true;
 
             for (auto n : offsetNodes)
-                n->setDynamicOffsetBeats (offset);
+            {
+                if (isGenuineJump)
+                    n->setDynamicOffsetBeats (offset);
+                else
+                    n->rebaseDynamicOffsetBeats (offset);
+            }
         }
     }
 

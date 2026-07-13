@@ -203,12 +203,16 @@ public:
         it forwards or backwards in time.
     */
     void setDynamicOffsetBeats (BeatDuration) override;
+    void rebaseDynamicOffsetBeats (BeatDuration) override;
 
     //==============================================================================
     graph::NodeProperties getNodeProperties() override;
     void prepareToPlay (const graph::PlaybackInitialisationInfo&) override;
     bool isReadyToProcess() override;
     void process (ProcessContext&) override;
+
+    /** Returns the number of independent time-stretch processors in the reader graph. */
+    int getNumTimeStretchStages() const noexcept          { return numTimeStretchStages; }
 
 private:
     //==============================================================================
@@ -233,6 +237,7 @@ private:
     double outputSampleRate = 44100.0;
     int outputBlockSize = 0;
     bool isFirstBlock = false;
+    int numTimeStretchStages = 0;
     const ReadAhead readAhead;
 
     size_t stateHash = 0;
