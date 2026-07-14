@@ -319,13 +319,22 @@ void ArrangerLauncherSwitchingNode::sortPlayingOrQueuedClipsFirst()
               });
 }
 
+bool ArrangerLauncherSwitchingNode::shouldActivateSlotPlayback (const LaunchHandle& launchHandle)
+{
+    if (launchHandle.getPlayingStatus() != LaunchHandle::PlayState::playing)
+        return false;
+
+    const auto queuedState = launchHandle.getQueuedStatus();
+    return ! queuedState || *queuedState != LaunchHandle::QueueState::stopQueued;
+}
+
 void ArrangerLauncherSwitchingNode::updatePlaySlotsState()
 {
     for (auto& n : launcherNodesCopy)
     {
         if (auto lh = n->getLaunchHandleIfNotUnique())
         {
-            if (lh->getPlayingStatus() == LaunchHandle::PlayState::playing)
+            if (shouldActivateSlotPlayback (*lh))
             {
                 track->playSlotClips = true;
                 return;

@@ -686,6 +686,15 @@ std::unique_ptr<tracktion::graph::Node> createNodeForAudioClip (AudioClipBase& c
         }
     }
 
+    // Arrangement audio is not mixed while a launcher owns this track, but the
+    // arranger graph remains a direct dependency of the switching node. Keep a
+    // lightweight wrapper in that graph and suspend only the reader/stretcher
+    // subgraph, avoiding duplicate loop-wrap work without reducing clip-level
+    // graph parallelism.
+    if (node && role == ClipRole::arranger && params.allowClipSlots)
+        if (auto* audioTrack = dynamic_cast<AudioTrack*> (clip.getTrack()))
+            node = makeNode<ArrangerClipControlNode> (*audioTrack, std::move (node));
+
     // Plugins
     if (params.includePlugins)
     {

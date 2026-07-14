@@ -179,6 +179,7 @@ using namespace std::literals;
 #include "playback/graph/tracktion_BenchmarkUtilities.h"
 
 #include "playback/graph/tracktion_TrackMutingNode.h"
+#include "playback/graph/tracktion_ArrangerClipControlNode.h"
 #include "playback/graph/tracktion_ArrangerLauncherSwitchingNode.h"
 #include "playback/graph/tracktion_AuxSendNode.h"
 #include "playback/graph/tracktion_ClickNode.h"
@@ -215,6 +216,7 @@ using namespace std::literals;
 #include "playback/graph/tracktion_HostedMidiInputDeviceNode.h"
 #include "playback/graph/tracktion_WaveInputDeviceNode.h"
 
+#include "playback/graph/tracktion_ArrangerClipControlNode.cpp"
 #include "playback/graph/tracktion_ArrangerLauncherSwitchingNode.cpp"
 #include "playback/graph/tracktion_AuxSendNode.cpp"
 #include "playback/graph/tracktion_ClickNode.cpp"
