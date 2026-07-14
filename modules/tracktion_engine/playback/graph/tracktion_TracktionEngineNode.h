@@ -171,6 +171,15 @@ public:
      */
     virtual void setDynamicOffsetBeats (BeatDuration) {}
 
+    /** Rebases a beat offset without introducing a playback discontinuity.
+        This is used when an enclosing timeline loops while the nested stream
+        continues monotonically.
+    */
+    virtual void rebaseDynamicOffsetBeats (BeatDuration newOffset)
+    {
+        setDynamicOffsetBeats (newOffset);
+    }
+
     /** Sets an offset to be applied to all times in this node, effectively shifting
         it forwards or backwards in time.
     */

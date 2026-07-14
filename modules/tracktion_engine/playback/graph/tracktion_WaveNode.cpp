@@ -982,21 +982,21 @@ inline WarpedTime warpTime (const WarpMap& map, TimePosition time)
 }
 
 //==============================================================================
-class WarpReader final  : public SingleInputAudioReader
+class WarpReader final  : public TimeStretchReaderBase
 {
 public:
     WarpReader (std::unique_ptr<AudioReader> input,
                 WarpMap warpMap,
                 TimeStretcher::Mode mode,
                 TimeStretcher::ElastiqueProOptions options)
-        : SingleInputAudioReader (std::make_unique<TimeStretchReader> (std::move (input), mode, options)),
+        : TimeStretchReaderBase (std::make_unique<TimeStretchReader> (std::move (input), mode, options)),
           reader (static_cast<TimeStretchReader*> (source.get())), map (std::move (warpMap))
     {
     }
 
     SampleCount getPosition() override
     {
-        return readPosition;
+        return getReadPosition();
     }
 
     void setPosition (TimePosition t) override
@@ -1006,28 +1006,62 @@ public:
 
     void setPosition (SampleCount t) override
     {
-        if (t == readPosition)
+        if (std::abs (t - getReadPosition()) <= 10)
             return;
 
-        readPosition = t;
+        readPosition = static_cast<double> (t);
         setSourcePosition (t);
+    }
+
+    void setSpeed (double speedRatio) override
+    {
+        timelineSpeedRatio = speedRatio;
+    }
+
+    void setPitch (double semitones) override
+    {
+        reader->setPitch (semitones);
     }
 
     bool readSamples (choc::buffer::ChannelArrayView<float>& destBuffer) override
     {
-        const auto unwarpedStartTime = TimePosition::fromSamples (readPosition, getSampleRate());
-        const auto ratio = warpTime (map, unwarpedStartTime).stretchRatio;
+        constexpr choc::buffer::FrameCount processingChunkSize = 256;
+        const auto numFrames = destBuffer.getNumFrames();
+        choc::buffer::FrameCount frame = 0;
 
-        reader->setSpeed (ratio);
-        readPosition += (SampleCount) destBuffer.getNumFrames();
+        while (frame < numFrames)
+        {
+            const auto framesThisTime = std::min (processingChunkSize, numFrames - frame);
+            const auto unwarpedStartTime = TimePosition::fromSamples (getReadPosition(), getSampleRate());
+            const auto warpRatio = warpTime (map, unwarpedStartTime).stretchRatio;
 
-        return reader->readSamples (destBuffer);
+            // TimeRangeReader supplies the source-tempo/edit-tempo ratio through
+            // setSpeed(). Compose it with the local warp ratio so one stretcher
+            // performs both transformations instead of nesting a second
+            // phase-vocoder around this reader.
+            reader->setSpeed (warpRatio * timelineSpeedRatio);
+
+            auto destChunk = destBuffer.getFrameRange ({ frame, frame + framesThisTime });
+            if (! reader->readSamples (destChunk))
+                return false;
+
+            readPosition += static_cast<double> (framesThisTime) * timelineSpeedRatio;
+            frame += framesThisTime;
+        }
+
+        return true;
     }
 
 private:
     TimeStretchReader* reader = nullptr;
     WarpMap map;
-    SampleCount readPosition = 0;
+    double readPosition = 0.0;
+    double timelineSpeedRatio = 1.0;
+
+    SampleCount getReadPosition() const
+    {
+        return static_cast<SampleCount> (readPosition + 0.5);
+    }
 
     void setSourcePosition (SampleCount pos)
     {
@@ -2116,6 +2150,17 @@ void WaveNodeRealTime::setDynamicOffsetBeats (BeatDuration newOffset)
     isFirstBlock = true;
 }
 
+void WaveNodeRealTime::rebaseDynamicOffsetBeats (BeatDuration newOffset)
+{
+    if (juce::approximatelyEqual (dynamicOffsetBeats->inBeats(), newOffset.inBeats()))
+        return;
+
+    // The source stream is still continuous; only its coordinate system moved
+    // because an enclosing transport looped. Do not arm the generic seek fade,
+    // which would attenuate the next loop-head transient.
+    (*dynamicOffsetBeats) = newOffset;
+}
+
 //==============================================================================
 tracktion::graph::NodeProperties WaveNodeRealTime::getNodeProperties()
 {
@@ -2189,6 +2234,7 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
     auto audioFileCacheReader = std::make_unique<AudioFileCacheReader> (std::move (fileCacheReader), isOfflineRender ? 5s : 0ms,
                                                                         destChannels, channelsToUse);
     std::unique_ptr<AudioReader> loopReader;
+    WarpReader* warpTimeStretcher = nullptr;
 
     // In autoTempo (syncTempo / syncPitch) the upstream BeatRangeReader splits reads at the loop boundary and
     // calls setPosition into each cycle, so the looping reader can gate past loopEnd to silence — this prevents
@@ -2225,7 +2271,10 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
     {
         // If we're using a warp map, the looping as to be applied above the warp so the loop times don't get warped
         // This can have performance hits though
-        loopReader = std::make_unique<WarpReader> (std::move (audioFileCacheReader), std::move (*warpMap), timeStretcherMode, elastiqueProOptions);
+        auto warpReader = std::make_unique<WarpReader> (std::move (audioFileCacheReader), std::move (*warpMap), timeStretcherMode, elastiqueProOptions);
+        warpTimeStretcher = warpReader.get();
+        loopReader = std::move (warpReader);
+        numTimeStretchStages = 1;
 
         if (! loopRangeForReader.isEmpty())
             loopReader = std::make_unique<LoopReader> (std::move (loopReader), loopRangeForReader, loopMode);
@@ -2251,22 +2300,38 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
     resamplerReader = resamplerAudioReader.get();
     std::unique_ptr<TimeStretchReaderBase> timeStretchReader;
 
-    if (! timestretchDisabled)
+    // WarpReader already owns a time stretcher. It accepts the timeline tempo
+    // ratio through TimeStretchReaderBase and composes that with its local warp
+    // ratio, so a second outer stretcher is unnecessary. Read-ahead has its own
+    // buffering contract and retains the existing two-stage graph for now.
+    const bool combineWarpAndTimelineStretch = warpTimeStretcher != nullptr
+                                            && readAhead == ReadAhead::no;
+
+    if (! timestretchDisabled && ! combineWarpAndTimelineStretch)
     {
         if (readAhead == ReadAhead::no)
             timeStretchReader = std::make_unique<TimeStretchReader> (std::move (resamplerAudioReader), timeStretcherMode, elastiqueProOptions);
         else
             timeStretchReader = std::make_unique<ReadAheadTimeStretchReader> (std::move (resamplerAudioReader), timeStretcherMode, elastiqueProOptions, outputBlockSize);
+
+        ++numTimeStretchStages;
     }
 
-    auto timeStretcher = timeStretchReader.get();
+    auto* timeStretcher = combineWarpAndTimelineStretch ? static_cast<TimeStretchReaderBase*> (warpTimeStretcher)
+                                                        : timeStretchReader.get();
     std::unique_ptr<TimeRangeReader> timeRangeReader;
     std::unique_ptr<EditReader> basicEditReader;
 
     if (syncPitch == SyncPitch::yes)
     {
         assert (fileTempoSequence);
-        auto pitchAdjuster = std::make_unique<PitchAdjustReader> (std::move (timeStretchReader), timeStretchReader.get(), *fileTempoSequence);
+        assert (timeStretcher != nullptr);
+        std::unique_ptr<AudioReader> stretchInput;
+        if (timeStretchReader)
+            stretchInput = std::move (timeStretchReader);
+        else
+            stretchInput = std::move (resamplerAudioReader);
+        auto pitchAdjuster = std::make_unique<PitchAdjustReader> (std::move (stretchInput), timeStretcher, *fileTempoSequence);
         pitchAdjustReader  = pitchAdjuster.get();
         timeRangeReader    = std::make_unique<TimeRangeReader> (std::move (pitchAdjuster), timeStretcher);
     }
@@ -2278,15 +2343,22 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
         }
         else
         {
+            assert (timeStretcher != nullptr);
+            std::unique_ptr<AudioReader> stretchInput;
+            if (timeStretchReader)
+                stretchInput = std::move (timeStretchReader);
+            else
+                stretchInput = std::move (resamplerAudioReader);
+
             if (pitchChangeSemitones != 0.0f)
             {
-                auto pitchAdjuster = std::make_unique<PitchAdjustReader> (std::move (timeStretchReader), timeStretchReader.get(), pitchChangeSemitones);
+                auto pitchAdjuster = std::make_unique<PitchAdjustReader> (std::move (stretchInput), timeStretcher, pitchChangeSemitones);
                 pitchAdjustReader  = pitchAdjuster.get();
                 timeRangeReader    = std::make_unique<TimeRangeReader> (std::move (pitchAdjuster), timeStretcher);
             }
             else
             {
-                timeRangeReader    = std::make_unique<TimeRangeReader> (std::move (timeStretchReader), timeStretcher);
+                timeRangeReader    = std::make_unique<TimeRangeReader> (std::move (stretchInput), timeStretcher);
             }
         }
     }
@@ -2351,6 +2423,7 @@ void WaveNodeRealTime::replaceStateIfPossible (WaveNodeRealTime& other)
 
     fileTempoSequence = other.fileTempoSequence;
     fileTempoPosition = other.fileTempoPosition;
+    numTimeStretchStages = other.numTimeStretchStages;
     resamplerReader = other.resamplerReader;
     editReader = other.editReader;
     pitchAdjustReader = other.pitchAdjustReader;
