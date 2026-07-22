@@ -322,6 +322,11 @@ public:
     void validateFile()
     {
         const juce::ScopedLock scl (blockUpdateLock);
+        // A proxy can enter the cache before its render has created a readable file.
+        // In that case this CachedFile was constructed with zero-valued metadata.
+        // AudioFileManager calls validateFile after the render completes, so refresh
+        // the cached metadata as well as allowing the reader to be opened again.
+        info = file.getInfo();
         failedToOpenFile = false;
     }
 
