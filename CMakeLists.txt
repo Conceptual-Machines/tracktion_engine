@@ -23,8 +23,13 @@ project(tracktion_engine
 option(JUCE_BUILD_EXTRAS "Build JUCE Examples" OFF)
 option(JUCE_BUILD_EXAMPLES "Build JUCE Extras" OFF)
 
-# Add JUCE modules
-add_subdirectory(modules/juce)
+# Add JUCE modules.
+# A host project (MAGDA) may already own JUCE and add it before this engine; in
+# that case bind to the host's copy instead of adding a second one. Standalone
+# builds of this repo still use the nested submodule.
+if (NOT TARGET juce::juce_core)
+    add_subdirectory(modules/juce)
+endif()
 
 # Add Tracktion Engine modules (core only)
 add_subdirectory(modules)
