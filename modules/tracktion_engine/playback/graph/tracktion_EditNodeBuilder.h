@@ -14,6 +14,7 @@ namespace tracktion { inline namespace engine
 {
 
 class TrackMuteState;
+class Plugin;
 
 //==============================================================================
 /**
@@ -38,6 +39,12 @@ struct CreateNodeParams
 //==============================================================================
 struct EditNodeBuilder
 {
+    /** Called after a graph node has been created for a regular plugin or rack
+        instance. Hosts can use this to wrap the plugin node with metering,
+        analysis, or other tap nodes.
+    */
+    static std::function<std::unique_ptr<graph::Node> (Plugin&, std::unique_ptr<graph::Node>)> insertOptionalPluginTapNode;
+
     /** If set, this will be called to give an opportunity to add an additional final
         node which could be used to add copy-protection noise or similar.
     */

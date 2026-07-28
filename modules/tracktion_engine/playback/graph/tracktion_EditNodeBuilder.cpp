@@ -14,76 +14,9 @@
 // - Only works with WaveAudioClips which have setUsesProxy (false) on them
 #define USE_DYNAMIC_OFFSET_CONTAINER_CLIP 1
 
-// MAGDA: Per-device peak metering — include before TE namespace.
-// Gated on __has_include so this fork still builds standalone (e.g. CI in
-// the TE repo) where the MAGDA header isn't on the include path. The
-// guard `MAGDA_HAS_DEVICE_METERING` is propagated to the use sites below.
-#if __has_include("DeviceMeteringManager.hpp")
- #include "DeviceMeteringManager.hpp"
- #define MAGDA_HAS_DEVICE_METERING 1
-#endif
-
 namespace tracktion { inline namespace engine
 {
 
-//==============================================================================
-// MAGDA: Lightweight graph node that applies per-device gain from an atomic.
-// Inserted between PluginNode and LevelMeasuringNode so metering reflects
-// post-gain levels. The atomic is owned by DeviceMeteringManager::Entry and
-// written from the message thread via DeviceMeteringManager::setGain().
-//==============================================================================
-class DeviceGainNode final : public tracktion::graph::Node
-{
-public:
-    DeviceGainNode (std::unique_ptr<tracktion::graph::Node> inputNode,
-                    std::atomic<float>& gainAtomic)
-        : input (std::move (inputNode)), gain (gainAtomic)
-    {
-        setOptimisations ({ tracktion::graph::ClearBuffers::no,
-                            tracktion::graph::AllocateAudioBuffer::yes });
-    }
-
-    tracktion::graph::NodeProperties getNodeProperties() override
-    {
-        auto props = input->getNodeProperties();
-        if (props.nodeID != 0)
-            hash_combine (props.nodeID, static_cast<size_t> (7364928150483726199)); // "DeviceGainNode"
-        return props;
-    }
-
-    std::vector<tracktion::graph::Node*> getDirectInputNodes() override { return { input.get() }; }
-    bool isReadyToProcess() override { return input->hasProcessed(); }
-
-    void process (ProcessContext& pc) override
-    {
-        auto sourceBuffers = input->getProcessedOutput();
-        auto destAudio = pc.buffers.audio;
-        jassert (sourceBuffers.audio.getSize() == destAudio.getSize());
-
-        // Copy audio from input
-        copyIfNotAliased (destAudio, sourceBuffers.audio);
-
-        // Forward MIDI
-        if (input->numOutputNodes == 1)
-            pc.buffers.midi.swapWith (sourceBuffers.midi);
-        else
-            pc.buffers.midi.copyFrom (sourceBuffers.midi);
-
-        // Apply gain
-        const float g = gain.load (std::memory_order_relaxed);
-        if (g != 1.0f)
-        {
-            auto buffer = tracktion::graph::toAudioBuffer (destAudio);
-            buffer.applyGain (g);
-        }
-    }
-
-private:
-    std::unique_ptr<tracktion::graph::Node> input;
-    std::atomic<float>& gain;
-};
-
-//==============================================================================
 //==============================================================================
 namespace
 {
@@ -1315,25 +1248,7 @@ std::unique_ptr<tracktion::graph::Node> createNodeForPlugin (Plugin& plugin, con
                                                    params.forRendering, params.includeBypassedPlugins,
                                                    maxNumChannels);
 
-   #if MAGDA_HAS_DEVICE_METERING
-    // MAGDA: Per-device gain + metering
-    if (auto* mgr = magda::DeviceMeteringManager::getInstanceForEdit (plugin.edit))
-    {
-        auto devicePath = mgr->getDevicePathForPlugin (&plugin);
-        if (devicePath.isValid())
-        {
-            auto& measurer = mgr->getOrCreateMeasurer (devicePath);
-
-            // Insert gain node before metering so meters reflect post-gain levels
-            if (auto* gainAtomic = mgr->getGainAtomic (devicePath))
-                node = makeNode<DeviceGainNode> (std::move (node), *gainAtomic);
-
-            node = makeNode<LevelMeasuringNode> (std::move (node), measurer);
-        }
-    }
-   #endif
-
-    return node;
+    return EditNodeBuilder::insertOptionalPluginTapNode (plugin, std::move (node));
 }
 
 std::unique_ptr<tracktion::graph::Node> createNodeForRackInstance (RackInstance& rackInstance, std::unique_ptr<Node> node,
@@ -1409,23 +1324,7 @@ std::unique_ptr<tracktion::graph::Node> createPluginNodeForList (PluginList& lis
         {
             node = createNodeForRackInstance (*rackInstance, std::move (node), params.processState,
                                               SampleRateAndBlockSize { params.sampleRate, params.blockSize });
-
-           #if MAGDA_HAS_DEVICE_METERING
-            // MAGDA: Per-device gain + metering for instrument racks
-            if (auto* mgr = magda::DeviceMeteringManager::getInstanceForEdit (list.getEdit()))
-            {
-                auto devicePath = mgr->getDevicePathForPlugin (p);
-                if (devicePath.isValid())
-                {
-                    auto& measurer = mgr->getOrCreateMeasurer (devicePath);
-
-                    if (auto* gainAtomic = mgr->getGainAtomic (devicePath))
-                        node = makeNode<DeviceGainNode> (std::move (node), *gainAtomic);
-
-                    node = makeNode<LevelMeasuringNode> (std::move (node), measurer);
-                }
-            }
-           #endif
+            node = EditNodeBuilder::insertOptionalPluginTapNode (*p, std::move (node));
         }
         else if (auto insertPlugin = dynamic_cast<InsertPlugin*> (p))
         {
@@ -2131,5 +2030,8 @@ std::unique_ptr<tracktion::graph::Node> createNodeForEdit (Edit& edit, const Cre
 
 std::function<std::unique_ptr<tracktion::graph::Node> (std::unique_ptr<tracktion::graph::Node>)> EditNodeBuilder::insertOptionalLastStageNode
     = [] (std::unique_ptr<tracktion::graph::Node> input) { return input; };
+
+std::function<std::unique_ptr<tracktion::graph::Node> (Plugin&, std::unique_ptr<tracktion::graph::Node>)> EditNodeBuilder::insertOptionalPluginTapNode
+    = [] (Plugin&, std::unique_ptr<tracktion::graph::Node> input) { return input; };
 
 }} // namespace tracktion { inline namespace engine
