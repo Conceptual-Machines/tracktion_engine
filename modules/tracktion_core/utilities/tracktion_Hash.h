@@ -13,7 +13,10 @@
 //==============================================================================
 /*
     These hash functions are from boost and so the boost license agreement and
-    attribution are included here:
+    attribution are included here.
+
+    hash_combine's mixing step is no longer boost's - see detail::mix below
+    (MAGDA #2085). The rest is unchanged.
 */
 //==============================================================================
 /*
@@ -44,19 +47,47 @@
 //==============================================================================
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 
 namespace tracktion { inline namespace core
 {
 
+namespace detail
+{
+    /** The finaliser from splitmix64: one input bit moves about half the output bits.
+
+        MAGDA #2085. Without it, hash_combine barely moved the seed, and node
+        ids - a per-type constant combined with an EditItemID around 1000 -
+        all landed within a few million of each other. Two of them collided on
+        a three-track Edit.
+    */
+    inline std::uint64_t mix (std::uint64_t x) noexcept
+    {
+        x ^= x >> 30;
+        x *= 0xbf58476d1ce4e5b9ull;
+        x ^= x >> 27;
+        x *= 0x94d049bb133111ebull;
+        x ^= x >> 31;
+        return x;
+    }
+}
+
 //==============================================================================
 //==============================================================================
-/** Hashes a type with a given seed, modifying the seed. */
+/** Hashes a type with a given seed, modifying the seed. Order sensitive. */
 template<typename T>
 void hash_combine (size_t& seed, const T& v)
 {
     static_assert (! std::is_pointer_v<T>, "Using a pointer here is almost certainly incorrect as it will change on each run");
-    seed ^= std::hash<T>()(v) + 0x9e3779b9 + (seed * 65537u) + (seed / 3u);
+
+    // The value is mixed before it is added: std::hash over an integer is the
+    // identity, so unmixed it contributes its low bits and nothing else.
+    const auto mixed = detail::mix (static_cast<std::uint64_t> (seed)
+                                     + 0x9e3779b97f4a7c15ull
+                                     + detail::mix (static_cast<std::uint64_t> (std::hash<T>()(v))));
+
+    seed = static_cast<size_t> (mixed);
 }
 
 /** Hashes a range with a default seed and returns the new hash value. */
