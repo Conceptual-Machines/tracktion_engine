@@ -52,7 +52,12 @@ struct LFOModifier::LFOModifierTimer    : public ModifierTimer
             if (syncTypeThisBlock == ModifierCommon::transport)
             {
                 const auto editTimeInBeats = tempoSequence.getBeats().inBeats();
-                const auto bars = (editTimeInBeats / currentTimeSig.numerator) * rateThisBlock;
+                // MAGDA fix: a bar is the numerator counted in the denominator's note
+                // value, and a beat is a quarter note, so 6/8 is three beats and not
+                // six. Using the numerator alone made every synced modifier in an x/8
+                // signature run long by 4/denominator (#2128).
+                const auto barBeats = 4.0 * currentTimeSig.numerator / currentTimeSig.denominator;
+                const auto bars = (editTimeInBeats / barBeats) * rateThisBlock;
 
                 if (rateTypeThisBlock >= ModifierCommon::sixteenBars && rateTypeThisBlock <= ModifierCommon::sixtyFourthT)
                 {
@@ -64,7 +69,7 @@ struct LFOModifier::LFOModifierTimer    : public ModifierTimer
             {
                 const double bpm = (currentTempo * rateThisBlock) / proportionOfBar;
                 const double secondsPerBeat = 60.0 / bpm;
-                const float secondsPerStep = static_cast<float> (secondsPerBeat * currentTimeSig.numerator);
+                const float secondsPerStep = static_cast<float> (secondsPerBeat * (4.0 * currentTimeSig.numerator / currentTimeSig.denominator));
                 const float secondsPerPattern = secondsPerStep;
                 ramp.setDuration (secondsPerPattern);
 

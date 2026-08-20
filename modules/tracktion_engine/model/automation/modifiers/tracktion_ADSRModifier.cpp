@@ -38,7 +38,11 @@ struct ADSRModifier::ADSRModifierTimer    : public ModifierTimer
             tempoSequence.set (editTime);
             const auto currentTempo = tempoSequence.getTempo();
             const auto currentTimeSig = tempoSequence.getTimeSignature();
-            secondsPerBar = (60.0 / currentTempo) * currentTimeSig.numerator;
+            // MAGDA fix: a bar is the numerator counted in the denominator's note
+            // value, and a beat is a quarter note, so 6/8 is three beats and not
+            // six. Using the numerator alone made every synced modifier in an x/8
+            // signature run long by 4/denominator (#2128).
+            secondsPerBar = (60.0 / currentTempo) * (4.0 * currentTimeSig.numerator / currentTimeSig.denominator);
         }
 
         auto stageDuration = [&] (const AutomatableParameter& msParam, const AutomatableParameter& syncParam) -> double
