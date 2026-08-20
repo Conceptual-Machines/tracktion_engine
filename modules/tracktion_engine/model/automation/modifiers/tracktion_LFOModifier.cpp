@@ -51,13 +51,13 @@ struct LFOModifier::LFOModifierTimer    : public ModifierTimer
 
             if (syncTypeThisBlock == ModifierCommon::transport)
             {
-                const auto editTimeInBeats = tempoSequence.getBeats().inBeats();
-                // MAGDA fix: a bar is the numerator counted in the denominator's note
-                // value, and a beat is a quarter note, so 6/8 is three beats and not
-                // six. Using the numerator alone made every synced modifier in an x/8
-                // signature run long by 4/denominator (#2128).
-                const auto barBeats = 4.0 * currentTimeSig.numerator / currentTimeSig.denominator;
-                const auto bars = (editTimeInBeats / barBeats) * rateThisBlock;
+                // MAGDA fix: the bar grid itself, rather than a beat count divided
+                // by the numerator. getBeats() is already in the signature's note
+                // value (LengthOfOneBeat::dependsOnTimeSignature), so no denominator
+                // correction belongs here; what the division did get wrong is the
+                // bar origin, which getTotalBars() restarts at every meter change
+                // instead of carrying the offset forward for ever (#2128).
+                const auto bars = tempoSequence.getBarsBeats().getTotalBars() * rateThisBlock;
 
                 if (rateTypeThisBlock >= ModifierCommon::sixteenBars && rateTypeThisBlock <= ModifierCommon::sixtyFourthT)
                 {
