@@ -35,7 +35,22 @@ struct LFOModifier::LFOModifierTimer    : public ModifierTimer
             ramp.setDuration (durationPerPattern);
 
             if (syncTypeThisBlock == ModifierCommon::transport)
-                ramp.setPosition (std::fmod ((float) editTime.inSeconds(), durationPerPattern));
+            {
+                // MAGDA fix: an edit time before zero wraps forward rather than
+                // going in negative. std::fmod keeps the sign of its left-hand
+                // side, so a negative edit time gives a negative position;
+                // Ramp::setPosition asserts on it and then clamps it to zero,
+                // which pins the phase at the top of the cycle for as long as
+                // the time stays negative. Two ordinary things produce one: a
+                // count-in, and the lead-in an offline render primes the graph
+                // with, which is half a second of it on every bounce.
+                auto position = std::fmod ((float) editTime.inSeconds(), durationPerPattern);
+
+                if (position < 0.0f)
+                    position += durationPerPattern;
+
+                ramp.setPosition (position);
+            }
 
             setPhase (ramp.getProportion());
 
