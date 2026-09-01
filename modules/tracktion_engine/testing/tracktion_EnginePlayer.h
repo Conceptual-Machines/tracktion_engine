@@ -10,7 +10,6 @@
 
 #pragma once
 
-#include "../../3rd_party/nanorange/tracktion_nanorange.hpp"
 #include "../../tracktion_graph/utilities/tracktion_GlueCode.h"
 
 ///@internal
@@ -83,8 +82,8 @@ public:
         juce::AudioBuffer<float> outputBlock;
         outputBlock.makeCopyOf (toAudioBuffer (processBuffer.getChannelRange ({ 0, static_cast<choc::buffer::ChannelCount> (params.outputChannels) })));
 
-        for (auto chan : nano::iota_view (static_cast<choc::buffer::ChannelCount> (0),
-                                          static_cast<choc::buffer::ChannelCount> (output.size())))
+        for (auto chan : std::views::iota (static_cast<choc::buffer::ChannelCount> (0),
+                                           static_cast<choc::buffer::ChannelCount> (output.size())))
         {
             auto srcChannelData = processBuffer.getChannel (chan).data.data;
             std::copy_n (srcChannelData, totalNumFrames, std::back_inserter (output[static_cast<size_t> (chan)]));
@@ -97,7 +96,7 @@ public:
     {
         choc::buffer::ChannelArrayBuffer<float> destBuffer (choc::buffer::Size::create (output.size(), numSamplesProcessed));
 
-        for (auto chan : nano::iota_view (static_cast<size_t> (0), output.size()))
+        for (auto chan : std::views::iota (static_cast<size_t> (0), output.size()))
             choc::buffer::copy (destBuffer.getChannel (static_cast<choc::buffer::ChannelCount> (chan)),
                                 choc::buffer::createMonoView (output[chan].data(), numSamplesProcessed));
 
