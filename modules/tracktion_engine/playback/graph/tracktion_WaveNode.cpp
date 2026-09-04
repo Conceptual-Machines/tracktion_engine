@@ -319,6 +319,13 @@ public:
     {
     }
 
+    /** The most source a block may consume per output frame.
+
+        Ten octaves up, past anything that still reads as pitch, and what bounds
+        the scratch buffer a degenerate ratio would otherwise size (#1955).
+    */
+    static constexpr double maxSpeedRatio = 1024.0;
+
     /** Sets a ratio to increase or decrease playback speed. */
     virtual void setSpeedRatio (double newSpeedRatio) = 0;
 
@@ -368,8 +375,13 @@ public:
     /** Sets a ratio to increase or decrease playback speed. */
     void setSpeedRatio (double newSpeedRatio) override
     {
+        // Clamped rather than asserted: the assert is compiled out of a release
+        // build, and a non-finite ratio arriving here hangs the audio thread
+        // inside the interpolator rather than sounding wrong (#1955).
         assert (newSpeedRatio > 0);
-        speedRatio = newSpeedRatio;
+        speedRatio = std::isfinite (newSpeedRatio) && newSpeedRatio > 0.0
+                         ? std::min (newSpeedRatio, maxSpeedRatio)
+                         : 1.0;
     }
 
     /** Sets a l/r gain to apply to channels. */
@@ -525,8 +537,13 @@ public:
     /** Sets a ratio to increase or decrease playback speed. */
     void setSpeedRatio (double newSpeedRatio) override
     {
+        // Clamped rather than asserted: the assert is compiled out of a release
+        // build, and a non-finite ratio arriving here hangs the audio thread
+        // inside the interpolator rather than sounding wrong (#1955).
         assert (newSpeedRatio > 0);
-        speedRatio = newSpeedRatio;
+        speedRatio = std::isfinite (newSpeedRatio) && newSpeedRatio > 0.0
+                         ? std::min (newSpeedRatio, maxSpeedRatio)
+                         : 1.0;
     }
 
     /** Sets a l/r gain to apply to channels. */
@@ -1171,7 +1188,22 @@ public:
             return true;
         }
 
-        const auto blockSpeedRatio = (tr.getLength() / editDuration) * playbackSpeedRatio;
+        // The guard above covers the numerator only. A speed-ramp fade begins from
+        // a standstill -- every ramp-up curve in SpeedFadeEditReader::rescale has
+        // zero derivative at its start -- so the warped edit duration reaching
+        // here goes to zero on the fade's first block. On the beat path the
+        // numerator is converted through the source's own tempo sequence and does
+        // not vanish with it, so the quotient runs away: at 48 kHz a 2 s ramp
+        // gives 8.5e4 and a 300 s ramp gives 1.9e9, and short blocks underflow
+        // the duration to zero outright. That ratio is both the resampler's
+        // scratch allocation and juce::Interpolator's inner loop count, and the
+        // loop cannot subtract 1.0 back below an infinity (#1955).
+        //
+        // Floored at the shortest duration a reader can represent rather than at
+        // a chosen speed, which bounds the ratio by the block's own source length.
+        const auto shortestBlock = TimeDuration::fromSamples (1, getSampleRate());
+        const auto blockSpeedRatio = (tr.getLength() / std::max (editDuration, shortestBlock))
+                                     * playbackSpeedRatio;
 
         if (timeStretchSource)
             timeStretchSource->setSpeed (blockSpeedRatio);
