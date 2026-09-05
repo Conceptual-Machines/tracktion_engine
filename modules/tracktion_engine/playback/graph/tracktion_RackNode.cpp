@@ -199,36 +199,53 @@ private:
 //==============================================================================
 namespace RackNodeBuilder
 {
-    inline tracktion::graph::ConnectedNode& getConnectedNode (tracktion::graph::Node& pluginOrModifierNode)
+    /** Returns the ConnectedNode every item in a Rack is built on top of.
+
+        A plugin or modifier sits directly on its own, but a nested Rack instance
+        is a whole send/return chain above one, so this searches rather than
+        taking the input one level down.
+    */
+    inline tracktion::graph::ConnectedNode* findConnectedNode (tracktion::graph::Node& itemNode)
     {
-        tracktion::graph::Node* node = dynamic_cast<PluginNode*> (&pluginOrModifierNode);
+        std::vector<tracktion::graph::Node*> toVisit { &itemNode };
 
-        if (node == nullptr)
-            node = dynamic_cast<ModifierNode*> (&pluginOrModifierNode);
+        while (! toVisit.empty())
+        {
+            auto node = toVisit.back();
+            toVisit.pop_back();
 
-        jassert (node != nullptr);
-        auto connectedNode = node->getDirectInputNodes().front();
-        jassert (dynamic_cast<tracktion::graph::ConnectedNode*> (connectedNode) != nullptr);
-        return *dynamic_cast<tracktion::graph::ConnectedNode*> (connectedNode);
+            if (auto connectedNode = dynamic_cast<tracktion::graph::ConnectedNode*> (node))
+                return connectedNode;
+
+            for (auto input : node->getDirectInputNodes())
+                if (input != nullptr)
+                    toVisit.push_back (input);
+        }
+
+        return nullptr;
     }
 
-    /** Returns a input channel index from 0 for a Modifier or Plugin Node.
+    inline tracktion::graph::ConnectedNode& getConnectedNode (tracktion::graph::Node& itemNode)
+    {
+        auto connectedNode = findConnectedNode (itemNode);
+        jassert (connectedNode != nullptr);
+        return *connectedNode;
+    }
+
+    /** Returns a input channel index from 0 for an item in a Rack.
 
         This horrible function is required because Modifier nodes may have a MIDI input pin in which
         case pin 0 is MIDI and any subsequent pins are audio but if they don't have an MIDI pin,
         audio channels start from pin 0.
-        Plugin nodes always have a MIDI input pin so audio always starts from pin 1.
+        Everything else always has a MIDI input pin so audio always starts from pin 1, which covers
+        plugins and the send/return chain a nested Rack instance is built as.
     */
-    inline int getDestChannelIndex (tracktion::graph::Node& destPluginOrModifierNode, int destPinIndex)
+    inline int getDestChannelIndex (tracktion::graph::Node& destItemNode, int destPinIndex)
     {
-        if (dynamic_cast<PluginNode*> (&destPluginOrModifierNode) != nullptr)
-            return destPinIndex - 1;
-
-        if (auto node = dynamic_cast<ModifierNode*> (&destPluginOrModifierNode))
+        if (auto node = dynamic_cast<ModifierNode*> (&destItemNode))
             return destPinIndex - node->getModifier().getMidiInputNames().size();
 
-        jassertfalse;
-        return -1;
+        return destPinIndex - 1;
     }
 
     static inline tracktion::graph::SummingNode& getSummingNode (tracktion::graph::Node& pluginOrModifierNode)
@@ -394,9 +411,21 @@ namespace RackNodeBuilder
         jassert (inputNode);
 
         for (auto plugin : rack.getPlugins())
-            itemNodes[plugin->itemID] = makeNode<PluginNode> (makeNode<ConnectedNode> ((size_t) plugin->itemID.getRawID()),
-                                                              plugin, sampleRate, blockSize, nullptr,
-                                                              processState, isRendering, true, -1);
+        {
+            auto connectedNode = makeNode<ConnectedNode> ((size_t) plugin->itemID.getRawID());
+
+            // A nested Rack instance processes nothing itself, so a plain
+            // PluginNode over it routes signal straight through unchanged. It
+            // needs the same send/return substitution EditNodeBuilder makes for
+            // an instance in a track's plugin list.
+            if (auto rackInstance = dynamic_cast<RackInstance*> (plugin))
+                itemNodes[plugin->itemID] = createNodeForRackInstance (*rackInstance, std::move (connectedNode),
+                                                                       processState, { sampleRate, blockSize });
+            else
+                itemNodes[plugin->itemID] = makeNode<PluginNode> (std::move (connectedNode),
+                                                                  plugin, sampleRate, blockSize, nullptr,
+                                                                  processState, isRendering, true, -1);
+        }
 
         for (auto m : rack.getModifierList().getModifiers())
             itemNodes[m->itemID] = makeNode<ModifierNode> (makeNode<ConnectedNode> ((size_t) m->itemID.getRawID()),

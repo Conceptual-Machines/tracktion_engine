@@ -46,4 +46,22 @@ private:
     bool canUseSourceBuffers = false, isInitialised = false;
 };
 
+
+//==============================================================================
+/** Bus IDs a Rack's own graph returns its input from and sends its output to. */
+int getRackInputBusID (EditItemID rackID);
+int getRackOutputBusID (EditItemID rackID);
+
+/** Routes a Node through a Rack's graph via that pair of buses, applying the
+    instance's channel maps, gains and delta solo.
+
+    Used both for an instance in a track's plugin list and for one nested in
+    another Rack's chain, which is otherwise built as a plain PluginNode over a
+    plugin whose applyToBuffer does nothing.
+*/
+std::unique_ptr<tracktion::graph::Node> createNodeForRackInstance (RackInstance&,
+                                                                   std::unique_ptr<tracktion::graph::Node>,
+                                                                   ProcessState&,
+                                                                   SampleRateAndBlockSize);
+
 }} // namespace tracktion { inline namespace engine
