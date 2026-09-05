@@ -36,10 +36,14 @@ public:
 private:
     //==============================================================================
     std::unique_ptr<Node> wetInput, dryLatencyNode;
+    /// The dry path as given, kept because the compensation over it is sized
+    /// again whenever the wet path's latency grows.
+    Node* uncompensatedDryInput = nullptr;
     Node* dryInput = nullptr;
     std::function<float()> wetGainFunction, dryGainFunction;
     float lastWetGain = 0.0f, lastDryGain = 0.0f;
-    bool hasTransformed = false, canUseWetSourceBuffers = false;
+    int compensationNumSamples = 0;
+    bool canUseWetSourceBuffers = false;
 };
 
 }} // namespace tracktion { inline namespace engine

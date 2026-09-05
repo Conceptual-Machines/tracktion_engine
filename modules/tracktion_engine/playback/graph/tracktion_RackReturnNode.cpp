@@ -16,6 +16,7 @@ RackReturnNode::RackReturnNode (std::unique_ptr<Node> wetNode,
                                 Node* dryNode,
                                 std::function<float()> dryGainFunc)
     : wetInput (std::move (wetNode)),
+      uncompensatedDryInput (dryNode),
       dryInput (dryNode),
       wetGainFunction (std::move (wetGainFunc)),
       dryGainFunction (std::move (dryGainFunc))
@@ -55,24 +56,40 @@ tracktion::graph::NodeProperties RackReturnNode::getNodeProperties()
 
 TransformResult RackReturnNode::transform (TransformOptions& options)
 {
-    if (hasTransformed)
+    if (options.disableLatencyCompensation)
         return TransformResult::none;
 
-    hasTransformed = true;
-    auto wetProps = wetInput->getNodeProperties();
-    auto dryProps = dryInput->getNodeProperties();
-    assert (dryProps.latencyNumSamples <= wetProps.latencyNumSamples);
+    // Sized on every pass rather than latched on the first. The wet path runs
+    // through the Rack's send/return buses, which connect during the transform
+    // too, so a Rack instance can be visited while its wet latency is still
+    // short by whatever precedes it. That happens to a nested instance, whose
+    // Rack's own input return is in a sibling graph that may be visited later.
+    const auto wetLatency = wetInput->getNodeProperties().latencyNumSamples;
+    const auto dryLatency = uncompensatedDryInput->getNodeProperties().latencyNumSamples;
+    const auto required = std::max (0, wetLatency - dryLatency);
 
-    if (wetProps.latencyNumSamples > dryProps.latencyNumSamples && ! options.disableLatencyCompensation)
+    if (required == compensationNumSamples)
+        return TransformResult::none;
+
+    const bool replacing = dryLatencyNode != nullptr;
+    compensationNumSamples = required;
+
+    if (required == 0)
     {
-        const int numLatencySamples = wetProps.latencyNumSamples - dryProps.latencyNumSamples;
-        dryLatencyNode = tracktion::graph::makeNode<tracktion::graph::LatencyNode> (dryInput, numLatencySamples);
-        dryInput = dryLatencyNode.get();
-
-        return TransformResult::connectionsMade;
+        dryInput = uncompensatedDryInput;
+        dryLatencyNode.reset();
+    }
+    else
+    {
+        auto node = tracktion::graph::makeNode<tracktion::graph::LatencyNode> (uncompensatedDryInput, required);
+        dryInput = node.get();
+        dryLatencyNode = std::move (node);
     }
 
-    return TransformResult::none;
+    // The node that was standing here is gone, and the caller's ordering still
+    // holds a pointer to it.
+    return replacing ? TransformResult::nodesDeleted
+                     : TransformResult::connectionsMade;
 }
 
 void RackReturnNode::prepareToPlay (const tracktion::graph::PlaybackInitialisationInfo&)

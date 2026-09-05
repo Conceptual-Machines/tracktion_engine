@@ -286,6 +286,16 @@ private:
             if (latencyToAdd <= 0)
                 continue;
 
+            // Same as ConnectedNode: revise a balance already struck here
+            // rather than stack a second LatencyNode on the first.
+            if (auto latencyNode = dynamic_cast<LatencyNode*> (node))
+            {
+                latencyNode->setLatencyNumSamples (latencyNode->getLatencyNumSamples() + latencyToAdd);
+                topologyChanged = true;
+                cachedNodeProperties = std::nullopt;
+                continue;
+            }
+
             auto getOwnedNode = [this] (auto nodeToFind)
             {
                 for (auto& ownedN : ownedNodes)
