@@ -323,17 +323,15 @@ void SlotControlNode::processSection (ProcessContext& pc, BeatRange editBeatRang
     // the opening window. Subtracting only the decaying initial-sample offset
     // de-clicks a non-zero boundary while leaving zero-crossing attacks intact.
     //
-    // Except where the run begins at its own material start, which has no
-    // boundary to remove: the first sample is the clip's own attack, and
-    // subtracting it takes the transient away and leaves a decaying tail in its
-    // place, so a drum one-shot launched from a slot loses its crack. What does
-    // have a boundary is a run starting mid-material -- a scene launch joining
-    // one already playing, or a clip with an offset -- and that still de-clicks.
-    const auto beganAtMaterialStart =
-        playStartTime && almostEqual (unloopedClipBeatRange.getStart().inBeats(),
-                                      playStartTime->inBeats(), 0.0000001);
+    // Not on a run that began here: its first sample is the clip's own attack,
+    // and subtracting it costs a one-shot its crack. A run joined in progress by
+    // a scene launch is mid-material and keeps it; a trimmed start is
+    // deliberately not a third case (magda-core#2457).
+    const auto joinedRunInProgress =
+        ! playStartTime || ! almostEqual (unloopedClipBeatRange.getStart().inBeats(),
+                                          playStartTime->inBeats(), 0.0000001);
 
-    if (! wasPlaying && launchFadeSamples > 0 && ! beganAtMaterialStart)
+    if (! wasPlaying && launchFadeSamples > 0 && joinedRunInProgress)
         applyAudioStartDeClick (pc.buffers.audio, launchFadeSamples);
 
     // Update last samples
