@@ -146,4 +146,65 @@ void RackInstanceNode::process (ProcessContext& pc)
     }
 }
 
+
+//==============================================================================
+//==============================================================================
+int getRackInputBusID (EditItemID rackID)
+{
+    constexpr size_t rackInputMagicNum = 0x7261636b496e;
+    return static_cast<int> (hash (rackInputMagicNum, rackID.getRawID()));
+}
+
+int getRackOutputBusID (EditItemID rackID)
+{
+    constexpr size_t rackOutputMagicNum = 0x7261636b4f7574;
+    return static_cast<int> (hash (rackOutputMagicNum, rackID.getRawID()));
+}
+
+std::unique_ptr<tracktion::graph::Node> createNodeForRackInstance (RackInstance& rackInstance,
+                                                                   std::unique_ptr<tracktion::graph::Node> node,
+                                                                   ProcessState& processState,
+                                                                   SampleRateAndBlockSize sampleRateAndBlockSize)
+{
+    using namespace tracktion::graph;
+
+    jassert (node != nullptr);
+
+    if (! rackInstance.isEnabled())
+        return node;
+
+    const auto rackInputID = getRackInputBusID (rackInstance.rackTypeID);
+    const auto rackOutputID = getRackOutputBusID (rackInstance.rackTypeID);
+
+    // The input to the instance is referenced by the dry signal path
+    auto* inputNode = node.get();
+
+    // Send
+    // N.B. the channel indicies from the RackInstance start a 1 so we need to subtract this to get a 0-indexed channel
+    RackInstanceNode::ChannelMap sendChannelMap;
+    sendChannelMap[0] = { 0, rackInstance.leftInputGoesTo - 1, rackInstance.leftInDb };
+    sendChannelMap[1] = { 1, rackInstance.rightInputGoesTo - 1, rackInstance.rightInDb };
+    node = makeNode<RackInstanceNode> (rackInstance, std::move (node), std::move (sendChannelMap), processState, sampleRateAndBlockSize);
+    node = makeNode<SendNode> (std::move (node), rackInputID);
+    node = makeNode<ReturnNode> (makeNode<SinkNode> (std::move (node)), rackOutputID);
+
+    // Return
+    RackInstanceNode::ChannelMap returnChannelMap;
+    returnChannelMap[0] = { rackInstance.leftOutputComesFrom - 1, 0, rackInstance.leftOutDb };
+    returnChannelMap[1] = { rackInstance.rightOutputComesFrom - 1, 1, rackInstance.rightOutDb };
+    node = makeNode<RackInstanceNode> (rackInstance, std::move (node), std::move (returnChannelMap), processState, sampleRateAndBlockSize);
+
+    RackInstance::Ptr rack (&rackInstance);
+    return makeNode<RackReturnNode> (std::move (node),
+                                     [rack, wetGain = rackInstance.wetGain]
+                                     {
+                                         return rack->isDeltaSoloEnabled() ? 1.0f : wetGain->getCurrentValue();
+                                     },
+                                     inputNode,
+                                     [rack, dryGain = rackInstance.dryGain]
+                                     {
+                                         return rack->isDeltaSoloEnabled() ? -1.0f : dryGain->getCurrentValue();
+                                     });
+}
+
 }} // namespace tracktion { inline namespace engine

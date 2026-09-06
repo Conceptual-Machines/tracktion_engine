@@ -45,6 +45,20 @@ public:
                             tracktion::graph::AllocateAudioBuffer::yes });
     }
 
+    int getLatencyNumSamples() const
+    {
+        return latencyProcessor->getLatencyNumSamples();
+    }
+
+    /** Revises the delay applied. Only valid before prepareToPlay: an input's
+        latency can still grow between transform passes, and a balance struck
+        against the old number has to be corrected rather than stacked on.
+    */
+    void setLatencyNumSamples (int numSamples)
+    {
+        latencyProcessor->setLatencyNumSamples (numSamples);
+    }
+
     NodeProperties getNodeProperties() override
     {
         auto props = input->getNodeProperties();

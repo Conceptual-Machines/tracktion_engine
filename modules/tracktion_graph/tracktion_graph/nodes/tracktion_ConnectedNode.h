@@ -282,9 +282,16 @@ inline bool ConnectedNode::createLatencyNodes()
         if (latencyToAdd == 0)
             continue;
 
+        // An input's latency can still grow between passes, so a balance
+        // already struck here is revised rather than stacked on.
+        if (auto latencyNode = dynamic_cast<LatencyNode*> (node.get()))
+        {
+            latencyNode->setLatencyNumSamples (latencyNode->getLatencyNumSamples() + latencyToAdd);
+            topologyChanged = true;
+            continue;
+        }
+
         // We should be the only thing owning this Node or we can't release it!
-        // We shouldn't be stacking LatencyNodes, rather we should modify their latency
-        jassert (dynamic_cast<LatencyNode*> (node.get()) == nullptr);
         node = std::make_shared<LatencyNode> (std::move (node), latencyToAdd);
 
         topologyChanged = true;

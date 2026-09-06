@@ -101,6 +101,13 @@ public:
 
     TransformResult transform (TransformOptions& options) override
     {
+        // An input's latency can grow after this node first cached its
+        // properties, because a ReturnNode deeper in the graph connects its
+        // send on a later pass. Everything above a stale cache then balances
+        // against a number that is no longer true, so the cache is dropped at
+        // the start of every pass and the last one settles it.
+        cachedNodeProperties = std::nullopt;
+
         const bool hasFlattened = flattenSummingNodes();
         const bool hasCreatedLatency = ! options.disableLatencyCompensation && createLatencyNodes();
 
@@ -278,6 +285,16 @@ private:
 
             if (latencyToAdd <= 0)
                 continue;
+
+            // Same as ConnectedNode: revise a balance already struck here
+            // rather than stack a second LatencyNode on the first.
+            if (auto latencyNode = dynamic_cast<LatencyNode*> (node))
+            {
+                latencyNode->setLatencyNumSamples (latencyNode->getLatencyNumSamples() + latencyToAdd);
+                topologyChanged = true;
+                cachedNodeProperties = std::nullopt;
+                continue;
+            }
 
             auto getOwnedNode = [this] (auto nodeToFind)
             {
