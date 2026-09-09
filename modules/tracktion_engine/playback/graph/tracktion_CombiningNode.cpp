@@ -80,7 +80,7 @@ struct CombiningNode::TimedNode
         for (auto n : nodesToProcess)
             n->prepareForNextBlock (referenceSampleRange);
 
-       #if JUCE_DEBUG
+       #if JUCE_DEBUG || JUCE_LOG_ASSERTIONS
         hasPrefetched = true;
        #endif
     }
@@ -104,7 +104,7 @@ struct CombiningNode::TimedNode
 
         pc.buffers.midi.mergeFrom (nodeOutput.midi);
 
-       #if JUCE_DEBUG
+       #if JUCE_DEBUG || JUCE_LOG_ASSERTIONS
         hasPrefetched = false;
        #endif
     }
@@ -124,7 +124,7 @@ struct CombiningNode::TimedNode
 private:
     const std::unique_ptr<Node> node;
     std::vector<Node*> nodesToProcess;
-   #if JUCE_DEBUG
+   #if JUCE_DEBUG || JUCE_LOG_ASSERTIONS
     bool hasPrefetched = false;
    #endif
 
