@@ -8,6 +8,8 @@
     Tracktion Engine uses a GPL/commercial licence - see LICENCE.md for details.
 */
 
+#include "tracktion_LaunchDeClick.h"
+
 namespace tracktion { inline namespace engine
 {
 
@@ -47,7 +49,9 @@ private:
     std::optional<BeatDuration> stopDuration;
     std::function<void (MonotonicBeat)> stopFunction;
     int launchFadeSamples = 256;
+    bool launchStartsInsideSource = false;
     bool wasPlaying = false;
+    std::shared_ptr<AudioStartDeClick> audioStartDeClick = std::make_shared<AudioStartDeClick>();
 
     const EditItemID slotID;
     std::unique_ptr<Node> input;

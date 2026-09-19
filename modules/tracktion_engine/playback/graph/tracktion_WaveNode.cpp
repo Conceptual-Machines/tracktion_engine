@@ -1263,6 +1263,22 @@ public:
 };
 
 
+static BeatPosition linearPositionToLoopPosition (BeatPosition position, BeatRange loopRange)
+{
+    if (loopRange.isEmpty())
+        return position;
+
+    // Map an unbounded source-absolute position into the loop range. Subtracting
+    // loopStart before modulo keeps non-zero loop starts in the correct phase.
+    const auto loopLength = loopRange.getLength().inBeats();
+    auto phase = std::fmod ((position - loopRange.getStart()).inBeats(), loopLength);
+
+    if (phase < 0.0)
+        phase += loopLength;
+
+    return loopRange.getStart() + BeatDuration::fromBeats (phase);
+}
+
 //==============================================================================
 /** N.B. This has to assume a constant Edit tempo per block.
     The top level Edit player should chunk at tempo changes.
@@ -1380,23 +1396,6 @@ private:
         return source->read ({ startTime, endTime }, destBuffer, editDuration, isContiguous, playbackSpeedRatio);
     }
 
-    static inline BeatPosition linearPositionToLoopPosition (BeatPosition position, BeatRange loopRange)
-    {
-        // Wrap `position` into the loop region. The previous implementation
-        // computed `loopStart + fmod(position, loopLength)`, which only gives
-        // the correct phase when `loopStart == 0`. For a copied clip whose
-        // loop region starts at a non-zero source beat (e.g. the right side
-        // of a split, or a time-range copy that began mid-loop), this folded
-        // the read position to the wrong source beat — outside the loop —
-        // and the WaveNode rendered silence past the loop boundary.
-        const auto loopLength = loopRange.getLength().inBeats();
-        auto phase = std::fmod ((position - loopRange.getStart()).inBeats(), loopLength);
-
-        if (phase < 0.0)
-            phase += loopLength;
-
-        return loopRange.getStart() + BeatDuration::fromBeats (phase);
-    }
 };
 
 //==============================================================================
@@ -1932,6 +1931,27 @@ void WaveNode::processSection (ProcessContext& pc, juce::Range<int64_t> timeline
 
 //==============================================================================
 //==============================================================================
+static bool isInsideSource (const AudioFile& file, TimePosition position)
+{
+    const auto sample = toSamples (position, file.getSampleRate());
+    return sample > 0 && sample < file.getLengthInSamples();
+}
+
+static bool doesBeatConfigStartInsideSource (const WaveNodeRealTime::BeatConfig& config,
+                                             const std::optional<WarpMap>& warpMap)
+{
+    const auto sourceBeat = linearPositionToLoopPosition (toPosition (config.offset),
+                                                          config.loopSection);
+    tempo::Sequence::Position sourcePosition (config.sourceFileTempoMap);
+    sourcePosition.set (sourceBeat);
+    auto sourceTime = sourcePosition.getTime();
+
+    if (warpMap)
+        sourceTime = warpTime (*warpMap, sourceTime).position;
+
+    return isInsideSource (config.audioFile, sourceTime);
+}
+
 WaveNodeRealTime::WaveNodeRealTime (const AudioFile& af,
                                     TimeRange editTime,
                                     TimeDuration off,
@@ -2012,6 +2032,7 @@ WaveNodeRealTime::WaveNodeRealTime (BeatConfig c)
       syncTempo (c.syncTempo),
       syncPitch (c.syncPitch)
 {
+    launchStartsInsideSource = doesBeatConfigStartInsideSource (c, warpMap);
     fileTempoSequence = std::make_shared<tempo::Sequence> (std::move (c.sourceFileTempoMap));
     fileTempoPosition = std::make_shared<tempo::Sequence::Position> (*fileTempoSequence);
 

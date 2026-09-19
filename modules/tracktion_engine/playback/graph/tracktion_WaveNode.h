@@ -214,6 +214,8 @@ public:
     /** Returns the number of independent time-stretch processors in the reader graph. */
     int getNumTimeStretchStages() const noexcept          { return numTimeStretchStages; }
 
+    bool doesLaunchStartInsideSource() const noexcept     { return launchStartsInsideSource; }
+
 private:
     //==============================================================================
     BeatRange editPositionBeats, loopSectionBeats;
@@ -237,6 +239,7 @@ private:
     double outputSampleRate = 44100.0;
     int outputBlockSize = 0;
     bool isFirstBlock = false;
+    bool launchStartsInsideSource = false;
     int numTimeStretchStages = 0;
     const ReadAhead readAhead;
 
