@@ -10,6 +10,7 @@
 
 #include "../../model/clips/tracktion_LaunchHandle.h"
 #include "tracktion_LaunchDeClick.h"
+#include "tracktion_WaveNode.h"
 
 namespace tracktion { inline namespace engine
 {
@@ -49,6 +50,9 @@ SlotControlNode::SlotControlNode (ProcessState& ps,
 
         if (auto mn = dynamic_cast<LoopingMidiNode*> (n))
             midiNode = mn;
+
+        if (auto wn = dynamic_cast<WaveNodeRealTime*> (n))
+            launchStartsInsideSource = launchStartsInsideSource || wn->doesLaunchStartInsideSource();
     }
 }
 
@@ -90,12 +94,20 @@ void SlotControlNode::prepareToPlay (const tracktion::graph::PlaybackInitialisat
     if (numChans == 0)
         return;
 
+    audioStartDeClick->prepare (numChans);
+
     if (auto oldGraph = info.nodeGraphToReplace)
     {
         if (auto oldNode = findNodeWithID<SlotControlNode> (*oldGraph, (size_t) slotID.getRawID()))
         {
             if (oldNode->lastSamples && oldNode->lastSamples->size() == numChans)
+            {
                 lastSamples = oldNode->lastSamples;
+
+                if (oldNode->audioStartDeClick
+                    && oldNode->audioStartDeClick->getNumChannels() == numChans)
+                    audioStartDeClick = oldNode->audioStartDeClick;
+            }
 
             // Preserve playing state across graph rebuilds to prevent
             // the fade-in from firing when a slot is already playing.
@@ -323,16 +335,23 @@ void SlotControlNode::processSection (ProcessContext& pc, BeatRange editBeatRang
     // the opening window. Subtracting only the decaying initial-sample offset
     // de-clicks a non-zero boundary while leaving zero-crossing attacks intact.
     //
-    // Not on a run that began here: its first sample is the clip's own attack,
-    // and subtracting it costs a one-shot its crack. A run joined in progress by
-    // a scene launch is mid-material and keeps it; a trimmed start is
-    // deliberately not a third case (magda-core#2457).
+    // Preserve an untrimmed source attack. Joined runs and clips whose own start
+    // maps inside their source have a silence-to-material boundary to correct.
     const auto joinedRunInProgress =
         ! playStartTime || ! almostEqual (unloopedClipBeatRange.getStart().inBeats(),
                                           playStartTime->inBeats(), 0.0000001);
 
-    if (! wasPlaying && launchFadeSamples > 0 && joinedRunInProgress)
-        applyAudioStartDeClick (pc.buffers.audio, launchFadeSamples);
+    if (! wasPlaying)
+    {
+        audioStartDeClick->reset();
+
+        if (launchFadeSamples > 0 && (joinedRunInProgress || launchStartsInsideSource))
+            audioStartDeClick->begin (pc.buffers.audio, launchFadeSamples);
+    }
+    else
+    {
+        audioStartDeClick->process (pc.buffers.audio);
+    }
 
     // Update last samples
     if (lastSamples)
@@ -352,6 +371,8 @@ void SlotControlNode::processSection (ProcessContext& pc, BeatRange editBeatRang
 
 void SlotControlNode::processStop (ProcessContext& pc, double timestampForMidiNoteOffs)
 {
+    audioStartDeClick->reset();
+
     if (midiNode)
     {
         midiNode->killActiveNotes (pc.buffers.midi, timestampForMidiNoteOffs);
