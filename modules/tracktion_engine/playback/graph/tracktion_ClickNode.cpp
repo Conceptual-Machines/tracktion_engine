@@ -113,14 +113,20 @@ namespace
         bool isFirstBeatOfBar = false;
     };
 
+    // The signature's beat in sequence beats: 1, or 4 / denominator when a beat is a crotchet
+    inline BeatDuration getSignatureBeat (const tempo::BarsAndBeats& barsBeats)
+    {
+        return BeatDuration::fromBeats (barsBeats.getBarLength() / std::max (1, barsBeats.numerator));
+    }
+
     inline BeatInfo getBeatInfo (const tempo::Sequence& sequence, tempo::Sequence::Position& tempoPosition)
     {
-        const auto beats = tempoPosition.getBeats().inBeats();
-        int beat = static_cast<int> (std::floor (beats));
-        const auto beatTime = sequence.toTime (BeatPosition::fromBeats (beat));
-        const bool isFirstBeatOfBar = tempoPosition.getBarsBeats().getWholeBeats() == 0;
+        auto barsBeats = tempoPosition.getBarsBeats();
+        const auto signatureBeat = getSignatureBeat (barsBeats).inBeats();
+        const auto tick = std::floor (barsBeats.beats.inBeats() / signatureBeat + 1.0e-6);
+        barsBeats.beats = BeatDuration::fromBeats (tick * signatureBeat);
 
-        return { beatTime, isFirstBeatOfBar };
+        return { sequence.toTime (barsBeats), tick == 0 };
     }
 }
 
@@ -154,7 +160,8 @@ void ClickGenerator::processBlock (choc::buffer::ChannelArrayView<float>* destBu
                                                        (t - editTime.getStart()).inSeconds(),
                                                        {});
 
-            tempoPosition.add (1_bd);
+            tempoPosition.set (t);
+            tempoPosition.add (getSignatureBeat (tempoPosition.getBarsBeats()));
             beatInfo = getBeatInfo (sequence, tempoPosition);
             t = beatInfo.time;
         }
@@ -192,7 +199,8 @@ void ClickGenerator::processBlock (choc::buffer::ChannelArrayView<float>* destBu
                 render (dstView);
             }
 
-            tempoPosition.add (1_bd);
+            tempoPosition.set (t);
+            tempoPosition.add (getSignatureBeat (tempoPosition.getBarsBeats()));
             beatInfo = getBeatInfo (sequence, tempoPosition);
             t = beatInfo.time;
         }

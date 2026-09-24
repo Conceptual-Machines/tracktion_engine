@@ -32,9 +32,13 @@ namespace tempo
         int bars = 0;               /**< The number of whole bars. */
         BeatDuration beats = {};    /**< The number of beats in the current bar. */
         int numerator = 0;          /**< The number of beats in the current bar. */
+        double barLength = 0;       /**< The bar's length in beats, when a beat is not the signature's note. */
 
         /** Returns the number bars elapsed. */
         double getTotalBars() const;
+
+        /** Returns the length of the current bar in beats. */
+        double getBarLength() const;
 
         /** Returns the number of whole beats. */
         int getWholeBeats() const;
@@ -352,7 +356,8 @@ inline BeatRange toBeats (const tempo::Sequence& seq, TimeRange range)
 namespace tempo
 {
 
-inline double BarsAndBeats::getTotalBars() const                { return bars + (beats.inBeats() / numerator); }
+inline double BarsAndBeats::getTotalBars() const                { return bars + (beats.inBeats() / getBarLength()); }
+inline double BarsAndBeats::getBarLength() const                { return barLength > 0 ? barLength : numerator; }
 inline int BarsAndBeats::getWholeBeats() const                  { return (int) std::floor (beats.inBeats()); }
 inline BeatDuration BarsAndBeats::getFractionalBeats() const    { return BeatDuration::fromBeats (beats.inBeats() - std::floor (beats.inBeats())); }
 
@@ -369,6 +374,8 @@ struct Sequence::Section
     TimePosition timeOfFirstBar;
     BeatDuration beatsUntilFirstBar;
     int barNumberOfFirstBar, numerator, prevNumerator, denominator;
+    double barLength, prevBarLength;    // in beats: numerator, or numerator * 4 / denominator when a beat is a crotchet
+    double ppqPerBeat;                  // 4 / denominator, or 1 when a beat is a crotchet
     bool triplets;
     Key key;
 };
@@ -410,11 +417,11 @@ namespace details
             const auto& it = sections[(size_t) i];
 
             if (it.barNumberOfFirstBar == barsBeats.bars + 1
-                  && barsBeats.beats.inBeats() >= it.prevNumerator - it.beatsUntilFirstBar.inBeats())
-                return it.timeOfFirstBar - it.secondsPerBeat * (BeatDuration::fromBeats (it.prevNumerator) - barsBeats.beats);
+                  && barsBeats.beats.inBeats() >= it.prevBarLength - it.beatsUntilFirstBar.inBeats())
+                return it.timeOfFirstBar - it.secondsPerBeat * (BeatDuration::fromBeats (it.prevBarLength) - barsBeats.beats);
 
             if (it.barNumberOfFirstBar <= barsBeats.bars || i == 0)
-                return it.timeOfFirstBar + it.secondsPerBeat * (BeatDuration::fromBeats (((barsBeats.bars - it.barNumberOfFirstBar) * it.numerator)) + barsBeats.beats);
+                return it.timeOfFirstBar + it.secondsPerBeat * (BeatDuration::fromBeats (((barsBeats.bars - it.barNumberOfFirstBar) * it.barLength)) + barsBeats.beats);
         }
 
         return {};
@@ -431,13 +438,13 @@ namespace details
                 const auto beatsSinceFirstBar = ((time - it.timeOfFirstBar) * it.beatsPerSecond).inBeats();
 
                 if (beatsSinceFirstBar < 0)
-                    return { it.barNumberOfFirstBar + (int) std::floor (beatsSinceFirstBar / it.numerator),
-                             BeatDuration::fromBeats (std::fmod (std::fmod (beatsSinceFirstBar, it.numerator) + it.numerator, it.numerator)),
-                             it.numerator };
+                    return { it.barNumberOfFirstBar + (int) std::floor (beatsSinceFirstBar / it.barLength),
+                             BeatDuration::fromBeats (std::fmod (std::fmod (beatsSinceFirstBar, it.barLength) + it.barLength, it.barLength)),
+                             it.numerator, it.barLength };
 
-                return { it.barNumberOfFirstBar + (int) std::floor (beatsSinceFirstBar / it.numerator),
-                         BeatDuration::fromBeats (std::fmod (beatsSinceFirstBar, it.numerator)),
-                         it.numerator };
+                return { it.barNumberOfFirstBar + (int) std::floor (beatsSinceFirstBar / it.barLength),
+                         BeatDuration::fromBeats (std::fmod (beatsSinceFirstBar, it.barLength)),
+                         it.numerator, it.barLength };
             }
         }
 
@@ -582,6 +589,9 @@ inline Sequence::Sequence (std::vector<TempoChange> tempos, std::vector<TimeSigC
             it.numerator        = currTimeSig.numerator;
             it.prevNumerator    = it.numerator;
             it.denominator      = currTimeSig.denominator;
+            it.barLength        = useDenominator ? it.numerator : it.numerator * 4.0 / it.denominator;
+            it.prevBarLength    = it.barLength;
+            it.ppqPerBeat       = useDenominator ? 4.0 / it.denominator : 1.0;
             it.triplets         = currTimeSig.triplets;
             it.startTime        = time;
             it.startBeat        = beatNum;
@@ -591,7 +601,7 @@ inline Sequence::Sequence (std::vector<TempoChange> tempos, std::vector<TimeSigC
             it.beatsPerSecond   = 1.0 / it.secondsPerBeat;
 
             it.ppqAtStart = ppq;
-            ppq += 4 * numBeats.inBeats() / it.denominator;
+            ppq += numBeats.inBeats() * it.ppqPerBeat;
 
             it.key              = currKey.key;
 
@@ -606,12 +616,16 @@ inline Sequence::Sequence (std::vector<TempoChange> tempos, std::vector<TimeSigC
                 const auto& prevSection = sections[sections.size() - 1];
 
                 const auto beatsSincePreviousBarUntilStart = (time - prevSection.timeOfFirstBar) * prevSection.beatsPerSecond;
-                const auto barsSincePrevBar = (int) std::ceil (beatsSincePreviousBarUntilStart.inBeats() / prevSection.numerator - 1.0e-5);
+                const auto barsSincePrevBar = (int) std::ceil (beatsSincePreviousBarUntilStart.inBeats() / prevSection.barLength - 1.0e-5);
 
                 it.barNumberOfFirstBar = prevSection.barNumberOfFirstBar + barsSincePrevBar;
 
-                const auto beatNumInEditOfNextBar = BeatPosition::fromBeats ((int) std::lround ((prevSection.startBeat + prevSection.beatsUntilFirstBar).inBeats())
-                                                                             + (barsSincePrevBar * prevSection.numerator));
+                // A crotchet-counted bar can end between beats (3.5 in 7/8), so snap to a fine grid there
+                const auto prevFirstBarBeat = (prevSection.startBeat + prevSection.beatsUntilFirstBar).inBeats();
+                const auto snappedFirstBarBeat = useDenominator ? (double) std::lround (prevFirstBarBeat)
+                                                                : std::round (prevFirstBarBeat * 960.0) / 960.0;
+                const auto beatNumInEditOfNextBar = BeatPosition::fromBeats (snappedFirstBarBeat
+                                                                             + (barsSincePrevBar * prevSection.barLength));
 
                 it.beatsUntilFirstBar = beatNumInEditOfNextBar - it.startBeat;
                 it.timeOfFirstBar = time + it.beatsUntilFirstBar * it.secondsPerBeat;
@@ -623,6 +637,7 @@ inline Sequence::Sequence (std::vector<TempoChange> tempos, std::vector<TimeSigC
                     if (tempo.barNumberOfFirstBar < it.barNumberOfFirstBar)
                     {
                         it.prevNumerator = tempo.numerator;
+                        it.prevBarLength = tempo.barLength;
                         break;
                     }
                 }
@@ -796,13 +811,13 @@ inline BarsAndBeats Sequence::Position::getBarsBeats() const
     const auto beatsSinceFirstBar = ((time - it.timeOfFirstBar) * it.beatsPerSecond).inBeats();
 
     if (beatsSinceFirstBar < 0)
-        return { it.barNumberOfFirstBar + (int) std::floor (beatsSinceFirstBar / it.numerator),
-                 BeatDuration::fromBeats (std::fmod (std::fmod (beatsSinceFirstBar, it.numerator) + it.numerator, it.numerator)),
-                 it.numerator };
+        return { it.barNumberOfFirstBar + (int) std::floor (beatsSinceFirstBar / it.barLength),
+                 BeatDuration::fromBeats (std::fmod (std::fmod (beatsSinceFirstBar, it.barLength) + it.barLength, it.barLength)),
+                 it.numerator, it.barLength };
 
-    return { it.barNumberOfFirstBar + (int) std::floor (beatsSinceFirstBar / it.numerator),
-             BeatDuration::fromBeats (std::fmod (beatsSinceFirstBar, it.numerator)),
-             it.numerator };
+    return { it.barNumberOfFirstBar + (int) std::floor (beatsSinceFirstBar / it.barLength),
+             BeatDuration::fromBeats (std::fmod (beatsSinceFirstBar, it.barLength)),
+             it.numerator, it.barLength };
 }
 
 inline double Sequence::Position::getTempo() const
@@ -864,12 +879,12 @@ inline TimePosition Sequence::Position::addBars (int bars)
     if (bars > 0)
     {
         while (--bars >= 0)
-            add (BeatDuration::fromBeats (sequence.sections[index].numerator));
+            add (BeatDuration::fromBeats (sequence.sections[index].barLength));
     }
     else
     {
         while (++bars <= 0)
-            add (BeatDuration::fromBeats (-sequence.sections[index].numerator));
+            add (BeatDuration::fromBeats (-sequence.sections[index].barLength));
     }
 
     return time;
@@ -975,7 +990,7 @@ inline void Sequence::Position::setPPQTime (double ppq)
     }
 
     const auto& it = sequence.sections[index];
-    const auto beatsSinceStart = BeatPosition::fromBeats (((ppq - it.ppqAtStart) * it.denominator) / 4.0);
+    const auto beatsSinceStart = BeatPosition::fromBeats ((ppq - it.ppqAtStart) / it.ppqPerBeat);
     time = (beatsSinceStart * it.secondsPerBeat) + toDuration (it.startTime);
 }
 
@@ -984,7 +999,7 @@ inline double Sequence::Position::getPPQTime() const noexcept
     const auto& it = sequence.sections[index];
     const auto beatsSinceStart = (time - it.startTime) * it.beatsPerSecond;
 
-    return it.ppqAtStart + 4.0 * beatsSinceStart.inBeats() / it.denominator;
+    return it.ppqAtStart + it.ppqPerBeat * beatsSinceStart.inBeats();
 }
 
 inline double Sequence::Position::getPPQTimeOfBarStart() const noexcept
@@ -996,9 +1011,9 @@ inline double Sequence::Position::getPPQTimeOfBarStart() const noexcept
 
         if (beatsSinceFirstBar >= -it.beatsUntilFirstBar.inBeats() || i == 0)
         {
-            const double beatNumberOfLastBarSinceFirstBar = it.numerator * std::floor (beatsSinceFirstBar / it.numerator);
+            const double beatNumberOfLastBarSinceFirstBar = it.barLength * std::floor (beatsSinceFirstBar / it.barLength);
 
-            return it.ppqAtStart + 4.0 * (it.beatsUntilFirstBar.inBeats() + beatNumberOfLastBarSinceFirstBar) / it.denominator;
+            return it.ppqAtStart + it.ppqPerBeat * (it.beatsUntilFirstBar.inBeats() + beatNumberOfLastBarSinceFirstBar);
         }
     }
 

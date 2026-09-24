@@ -91,6 +91,28 @@ public:
             expect (seq, BeatPosition::fromBeats (120), 2min);
         }
 
+        beginTest ("120bpm 6/8 and 7/8 isAlwaysACrotchet bars");
+        {
+            Sequence seq ({{ BeatPosition(), 120.0, 0.0f }},
+                          {{ BeatPosition(), 6, 8, false }, { BeatPosition::fromBeats (6), 7, 8, false }},
+                          tempo::LengthOfOneBeat::isAlwaysACrotchet);
+
+            expect (seq, BeatPosition::fromBeats (3), TimePosition::fromSeconds (1.5));
+
+            auto bar1 = seq.toBarsAndBeats (TimePosition::fromSeconds (1.5));
+            expectEquals (bar1.bars, 1);
+            expectWithinAbsoluteError (bar1.beats.inBeats(), 0.0, 1.0e-9);
+            expectWithinAbsoluteError (bar1.getBarLength(), 3.0, 1.0e-9);
+
+            // 7/8 from beat 6: bars of 3.5 crotchets
+            expect (seq.toTime ({ 3, {} }) == TimePosition::fromSeconds (6.0 * 0.5 + 3.5 * 0.5));
+
+            Sequence::Position pos (seq);
+            pos.set (BeatPosition::fromBeats (3));
+            expectWithinAbsoluteError (pos.getPPQTime(), 3.0, 1.0e-9);
+            expectWithinAbsoluteError (pos.getPPQTimeOfBarStart(), 3.0, 1.0e-9);
+        }
+
         beginTest ("120bpm 4/4");
         {
             Sequence seq ({{ BeatPosition(), 120.0, 0.0f }},

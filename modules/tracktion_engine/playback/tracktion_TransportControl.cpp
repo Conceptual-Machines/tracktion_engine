@@ -1009,9 +1009,6 @@ void TransportControl::syncToEdit (Edit* editToSyncTo, bool isPreview)
         if (auto targetContext = editToSyncTo->getTransport().getCurrentPlaybackContext())
         {
             auto& tempoSequence = editToSyncTo->tempoSequence;
-            auto& tempo   = tempoSequence.getTempoAt (position);
-            auto& timeSig = tempoSequence.getTimeSigAt (position);
-
             auto barsBeats = tempoSequence.toBarsAndBeats (targetContext->isLooping()
                                                             ? targetContext->getLoopTimes().getStart()
                                                             : position);
@@ -1019,7 +1016,7 @@ void TransportControl::syncToEdit (Edit* editToSyncTo, bool isPreview)
             auto previousBarTime = tempoSequence.toTime ({ barsBeats.bars, {} });
 
             auto syncInterval = isPreview ? targetContext->getLoopTimes().getLength()
-                                          : TimeDuration::fromSeconds ((60.0 / tempo.getBpm() * timeSig.numerator));
+                                          : tempoSequence.toTime ({ barsBeats.bars + 1, {} }) - previousBarTime;
 
             playbackContext->syncToContext (targetContext, previousBarTime, syncInterval);
         }
